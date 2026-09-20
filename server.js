@@ -6,36 +6,37 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const { Pool } = require("pg");
+const multer = require("multer");
 
 /* =========================================================
-CONFIG
-========================================================= */
+   CONFIG & CONSTANTS
+   ========================================================= */
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const BOT_USERNAME = process.env.BOT_USERNAME;
-const ADMIN_SECRET = process.env.ADMIN_SECRET;
+const BOT_USERNAME = process.env.BOT_USERNAME || "AdewaBot";
 const DATABASE_URL = process.env.DATABASE_URL;
 
-const ADMIN_TELEGRAM_IDS = (process.env.ADMIN_TELEGRAM_IDS || "")
-  .split(",")
-  .map((x) => Number(x.trim()))
-  .filter(Boolean);
+const ADMIN_TELEGRAM_ID = 8845432223;
+const MANDATORY_CHANNEL = "@proof_chnallel";
+const PROOF_CHANNEL_ID = process.env.PROOF_CHANNEL_ID || "@proof_chnallel";
 
-const MIN_WITHDRAW = Number(process.env.MIN_WITHDRAW || 100);
-const MIN_ACTIVE_REFERRALS = Number(process.env.MIN_REFERRALS || 10);
 const AD_REWARD = 0.50;
-const DAILY_AD_LIMIT = 30;
-const REFERRAL_REWARD = Number(process.env.REFERRAL_REWARD || 5);
-const VISIT_MIN_SECONDS = Number(process.env.VISIT_MIN_SECONDS || 15);
+const MAX_DAILY_ADS = 30;
+const AD_COOLDOWN_SECONDS = 20;
+const MIN_WITHDRAW = 100.00;
+const REQUIRED_QUALIFIED_REFS = 10;
 
-// ዋናው የቴሌግራም ቻናል (Task እና Withdrawal ላይ ግዴታ የሚደረገው)
-const OFFICIAL_CHANNEL = String(process.env.OFFICIAL_CHANNEL || "@YOUR_CHANNEL_USERNAME").trim();
+/* Multer memory storage for screenshot upload */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
+});
 
 /* =========================================================
-DATABASE
-========================================================= */
+   DATABASE POOL
+   ========================================================= */
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -43,65 +44,24 @@ const pool = new Pool({
 });
 
 /* =========================================================
-MIDDLEWARE
-========================================================= */
+   MIDDLEWARE
+   ========================================================= */
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      const allowed = [
-        process.env.FRONTEND_URL,
-        "https://telegram.org",
-        "https://web.telegram.org"
-      ].filter(Boolean);
-
-      if (allowed.includes(origin) || origin.startsWith("https://abdulselamahemade608-prog.github.io")) {
-        return callback(null, true);
-      }
-      return callback(new Error("CORS blocked."));
-    },
-    credentials: false
-  })
-);
-
-app.use(express.json({ limit: "100kb" }));
+app.use(cors({ origin: true, credentials: false }));
+app.use(express.json({ limit: "500kb" }));
 
 /* =========================================================
-BASIC ROUTES
-========================================================= */
-
-app.get("/", (req, res) => {
-  res.json({
-    ok: true,
-    service: "FulusApp Backend",
-    version: "1.2.0",
-    status: "online"
-  });
-});
-
-app.get("/health", async (req, res) => {
-  try {
-    await pool.query("SELECT 1");
-    res.json({ ok: true, database: "connected" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ ok: false, database: "error" });
-  }
-});
-
-/* =========================================================
-TELEGRAM AUTH VALIDATION
-========================================================= */
+   TELEGRAM INIT DATA AUTHENTICATION & FINGERPRINTING
+   ========================================================= */
 
 function validateTelegramInitData(initData) {
   if (!initData || !BOT_TOKEN) {
-    throw new Error("የቴሌግራም ማረጋገጫ አልተገኘም።");
+    throw new Error("Missing Telegram authentication context.");
   }
 
   const params = new URLSearchParams(initData);
   const receivedHash = params.get("hash");
-  if (!receivedHash) throw new Error("Telegram hash missing.");
+  if (!receivedHash) throw new Error("Telegram hash parameter missing.");
 
   params.delete("hash");
 
@@ -117,33 +77,19 @@ function validateTelegramInitData(initData) {
   const calculated = Buffer.from(calculatedHash, "hex");
 
   if (received.length !== calculated.length || !crypto.timingSafeEqual(received, calculated)) {
-    throw new Error("ትክክለኛ ያልሆነ የቴሌግራም መረጃ።");
+    throw new Error("Invalid Telegram security signature.");
   }
 
   const authDate = Number(params.get("auth_date"));
-  if (!authDate || !Number.isFinite(authDate)) {
-    throw new Error("Invalid Telegram auth date.");
-  }
-
-  const age = Math.floor(Date.now() / 1000) - authDate;
-  if (age > 86400 || age < -60) {
-    throw new Error("Telegram authentication expired.");
+  if (!authDate || Date.now() / 1000 - authDate > 86400) {
+    throw new Error("Session expired. Please relaunch from Telegram.");
   }
 
   const userRaw = params.get("user");
-  if (!userRaw) throw new Error("የተጠቃሚ መረጃ አልተገኘም።");
-
-  let user;
-  try {
-    user = JSON.parse(userRaw);
-  } catch {
-    throw new Error("Invalid Telegram user.");
-  }
-
-  if (!user.id) throw new Error("Invalid Telegram user ID.");
+  if (!userRaw) throw new Error("Telegram user profile missing.");
 
   return {
-    user,
+    user: JSON.parse(userRaw),
     startParam: params.get("start_param") || null
   };
 }
@@ -152,142 +98,111 @@ async function authenticate(req, res, next) {
   try {
     const initData = req.headers["x-telegram-init-data"];
     const auth = validateTelegramInitData(initData);
-    const user = auth.user;
+    const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress;
 
-    await upsertUser(user, auth.startParam);
-    req.telegramUser = user;
+    req.telegramUser = auth.user;
     req.startParam = auth.startParam;
+    req.clientIp = clientIp;
+
+    await upsertUser(auth.user, auth.startParam, clientIp);
     next();
   } catch (error) {
-    console.error("AUTH ERROR:", error.message);
-    return res.status(401).json({ ok: false, message: error.message || "የማረጋገጫ ስህተት አጋጥሟል።" });
+    return res.status(401).json({ ok: false, message: error.message || "Authentication failed." });
   }
 }
 
-async function adminAuth(req, res, next) {
-  const secret = req.headers["x-admin-secret"];
-  if (secret && secret === ADMIN_SECRET) return next();
-
+async function adminOnly(req, res, next) {
   try {
     const initData = req.headers["x-telegram-init-data"];
-    if (initData) {
-      const auth = validateTelegramInitData(initData);
-      if (ADMIN_TELEGRAM_IDS.includes(Number(auth.user.id))) {
-        req.telegramUser = auth.user;
-        return next();
-      }
-    }
-  } catch (e) { /* fall through */ }
+    const auth = validateTelegramInitData(initData);
 
-  return res.status(403).json({ ok: false, message: "የአድሚን ፈቃድ ያስፈልጋል።" });
+    if (Number(auth.user.id) !== ADMIN_TELEGRAM_ID) {
+      return res.status(403).json({ ok: false, message: "Access denied. Admin rights required." });
+    }
+    req.telegramUser = auth.user;
+    next();
+  } catch (e) {
+    return res.status(403).json({ ok: false, message: "Admin authorization rejected." });
+  }
 }
 
 /* =========================================================
-USER & REFERRAL LOGIC
-========================================================= */
+   USER PROFILE & REFERRAL REGISTRATION
+   ========================================================= */
 
-async function upsertUser(telegramUser, startParam = null) {
+function generateReferralCode(telegramId) {
+  return crypto.createHash("sha256").update(`${telegramId}:${BOT_TOKEN}`).digest("hex").substring(0, 8).toUpperCase();
+}
+
+async function upsertUser(u, startParam, ip) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-
-    const existing = await client.query(
-      `SELECT telegram_id FROM users WHERE telegram_id = $1 FOR UPDATE`,
-      [telegramUser.id]
-    );
+    const existing = await client.query("SELECT id FROM users WHERE telegram_id = $1 FOR UPDATE", [u.id]);
 
     if (existing.rowCount === 0) {
-      const referralCode = generateReferralCode(telegramUser.id);
+      const refCode = generateReferralCode(u.id);
+      let referrerId = null;
+
+      if (startParam && startParam.startsWith("ref_")) {
+        const code = startParam.slice(4).trim().toUpperCase();
+        const refRes = await client.query("SELECT telegram_id FROM users WHERE referral_code = $1", [code]);
+        if (refRes.rowCount > 0 && String(refRes.rows[0].telegram_id) !== String(u.id)) {
+          referrerId = refRes.rows[0].telegram_id;
+        }
+      }
+
       await client.query(
-        `INSERT INTO users (telegram_id, username, first_name, last_name, photo_url, referral_code)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [
-          telegramUser.id,
-          telegramUser.username || null,
-          telegramUser.first_name || null,
-          telegramUser.last_name || null,
-          telegramUser.photo_url || null,
-          referralCode
-        ]
+        `INSERT INTO users (telegram_id, username, first_name, last_name, photo_url, referral_code, referred_by, registration_ip, last_ip)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)`,
+        [u.id, u.username || null, u.first_name || null, u.last_name || null, u.photo_url || null, refCode, referrerId, ip]
       );
-      await registerReferral(client, telegramUser.id, startParam);
+
+      if (referrerId) {
+        await client.query(
+          `INSERT INTO referrals (referrer_id, referred_id) VALUES ($1, $2) ON CONFLICT (referred_id) DO NOTHING`,
+          [referrerId, u.id]
+        );
+      }
     } else {
       await client.query(
         `UPDATE users
-         SET username = $2, first_name = $3, last_name = $4, photo_url = $5, updated_at = NOW()
+         SET username = $2, first_name = $3, last_name = $4, photo_url = $5, last_ip = $6, updated_at = NOW()
          WHERE telegram_id = $1`,
-        [
-          telegramUser.id,
-          telegramUser.username || null,
-          telegramUser.first_name || null,
-          telegramUser.last_name || null,
-          telegramUser.photo_url || null
-        ]
+        [u.id, u.username || null, u.first_name || null, u.last_name || null, u.photo_url || null, ip]
       );
     }
-
     await client.query("COMMIT");
-  } catch (error) {
+  } catch (err) {
     await client.query("ROLLBACK");
-    throw error;
+    throw err;
   } finally {
     client.release();
   }
 }
 
-async function registerReferral(client, newUserId, startParam) {
-  if (!startParam || !String(startParam).startsWith("ref_")) return;
-
-  const code = String(startParam).slice(4).trim().toUpperCase();
-  if (!/^[A-Z0-9]{10}$/.test(code)) return;
-
-  const referrerResult = await client.query(
-    `SELECT telegram_id FROM users WHERE referral_code = $1 FOR UPDATE`,
-    [code]
-  );
-
-  if (referrerResult.rowCount === 0) return;
-  const referrerId = referrerResult.rows[0].telegram_id;
-  if (String(referrerId) === String(newUserId)) return;
-
-  // አዲስ ሪፈራል መመዝገብ (መጀመሪያ is_active = FALSE ነው የሚሆነው)
-  await client.query(
-    `INSERT INTO referrals (referrer_id, referred_id, is_active, reward_paid)
-     VALUES ($1, $2, FALSE, FALSE)
-     ON CONFLICT (referred_id) DO NOTHING`,
-    [referrerId, newUserId]
-  );
-
-  await client.query(`UPDATE users SET referred_by = $2 WHERE telegram_id = $1`, [newUserId, referrerId]);
-}
-
-function generateReferralCode(telegramId) {
-  const hash = crypto.createHash("sha256").update(`${telegramId}:${BOT_TOKEN}`).digest("hex");
-  return hash.substring(0, 10).toUpperCase();
-}
-
-async function getSetting(key, fallback) {
-  const result = await pool.query(`SELECT value FROM settings WHERE key = $1`, [key]);
-  if (result.rowCount === 0) return fallback;
-  return result.rows[0].value;
-}
-
 /* =========================================================
-TELEGRAM CHANNEL MEMBERSHIP CHECK
-========================================================= */
+   TELEGRAM BOT API HELPERS
+   ========================================================= */
 
-async function checkChannelMembership(telegramId, channelUsername) {
-  if (!channelUsername) return true;
+async function telegramBotCall(method, body) {
+  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/${method}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  return await res.json();
+}
+
+async function checkTelegramChannelMembership(telegramId, channelUsername) {
   try {
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: channelUsername, user_id: telegramId })
+    const data = await telegramBotCall("getChatMember", {
+      chat_id: channelUsername,
+      user_id: telegramId
     });
-    const data = await res.json();
     if (!data.ok) return false;
     return ["creator", "administrator", "member"].includes(data.result.status) ||
-      (data.result.status === "restricted" && data.result.is_member === true);
+           (data.result.status === "restricted" && data.result.is_member === true);
   } catch (err) {
     console.error("Channel check error:", err.message);
     return false;
@@ -295,114 +210,72 @@ async function checkChannelMembership(telegramId, channelUsername) {
 }
 
 /* =========================================================
-CHECK & ACTIVATE REFERRALS (2 Days Full Ads + Channel)
-========================================================= */
+   CORE ROUTES
+   ========================================================= */
 
-async function checkReferralActivation(client, userId) {
-  const uRes = await client.query(
-    `SELECT referred_by, full_ad_days_count FROM users WHERE telegram_id = $1`,
-    [userId]
-  );
-  if (uRes.rowCount === 0 || !uRes.rows[0].referred_by) return;
-
-  const user = uRes.rows[0];
-  const referrerId = user.referred_by;
-
-  // መስፈርት፡ ቢያንስ የ2 ቀን ሙሉ ማስታወቂያ (full_ad_days_count >= 2) እና ቻናል መግባት
-  const joinedChannel = await checkChannelMembership(userId, OFFICIAL_CHANNEL);
-
-  if (Number(user.full_ad_days_count) >= 2 && joinedChannel) {
-    const refCheck = await client.query(
-      `SELECT id, is_active FROM referrals WHERE referred_id = $1 AND is_active = FALSE`,
-      [userId]
-    );
-
-    if (refCheck.rowCount > 0) {
-      // ሪፈራሉን ንቁ (active) ማድረግ እና ለጋባዡ ሽልማት መስጠት
-      await client.query(`UPDATE referrals SET is_active = TRUE, reward_paid = TRUE WHERE referred_id = $1`, [userId]);
-
-      const refUserRes = await client.query(`SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE`, [referrerId]);
-      const before = Number(refUserRes.rows[0].balance);
-      const after = before + REFERRAL_REWARD;
-
-      await client.query(
-        `UPDATE users SET balance = $2, total_earned = total_earned + $3, updated_at = NOW() WHERE telegram_id = $1`,
-        [referrerId, after, REFERRAL_REWARD]
-      );
-
-      await client.query(
-        `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
-         VALUES ($1, 'referral', $2, $3, $4, $5, $6)`,
-        [referrerId, REFERRAL_REWARD, before, after, `ref_${userId}`, "Active Referral Reward (2 Days Full Ads Completed)"]
-      );
-    }
-  }
-}
-
-/* =========================================================
-USER INFO & DASHBOARD (/api/me)
-========================================================= */
-
+/* 1. Account Initialization & Live State */
 app.get("/api/me", authenticate, async (req, res) => {
   try {
-    const telegramId = req.telegramUser.id;
-    const client = await pool.connect();
-    let user;
+    const uid = req.telegramUser.id;
 
-    try {
-      const userResult = await client.query(`SELECT * FROM users WHERE telegram_id = $1`, [telegramId]);
-      user = userResult.rows[0];
+    // Verify channel status live
+    const isChannelMember = await checkTelegramChannelMembership(uid, MANDATORY_CHANNEL);
+    await pool.query("UPDATE users SET channel_joined = $1 WHERE telegram_id = $2", [isChannelMember, uid]);
 
-      // የቀን አድስ ቆጣሪን በየቀኑ Reset ማድረግ
-      const today = new Date().toISOString().slice(0, 10);
-      const lastAdDate = user.last_ad_date ? new Date(user.last_ad_date).toISOString().slice(0, 10) : null;
+    const userRes = await pool.query("SELECT * FROM users WHERE telegram_id = $1", [uid]);
+    const user = userRes.rows[0];
 
-      if (lastAdDate !== today) {
-        await client.query(
-          `UPDATE users SET today_ads_count = 0, last_ad_date = CURRENT_DATE WHERE telegram_id = $1`,
-          [telegramId]
-        );
-        user.today_ads_count = 0;
+    // Today's Ads Progress
+    const todayProgress = await pool.query(
+      "SELECT ads_watched FROM daily_ad_progress WHERE telegram_id = $1 AND ad_date = CURRENT_DATE",
+      [uid]
+    );
+    const todayAdsWatched = todayProgress.rows[0]?.ads_watched || 0;
+
+    // Referrals List with 2-day Qualification Tracking
+    const refsRes = await pool.query(
+      `SELECT 
+          u.telegram_id AS id,
+          u.first_name AS name,
+          u.channel_joined,
+          COALESCE(p1.ads_watched, 0) AS day1_ads,
+          COALESCE(p2.ads_watched, 0) AS day2_ads,
+          r.is_qualified
+       FROM referrals r
+       JOIN users u ON u.telegram_id = r.referred_id
+       LEFT JOIN daily_ad_progress p1 ON p1.telegram_id = u.telegram_id AND p1.ad_date = CURRENT_DATE
+       LEFT JOIN daily_ad_progress p2 ON p2.telegram_id = u.telegram_id AND p2.ad_date = CURRENT_DATE - INTERVAL '1 day'
+       WHERE r.referrer_id = $1
+       ORDER BY r.created_at DESC`,
+      [uid]
+    );
+
+    // Update qualification status if completed Day 1 + Day 2 + Channel
+    let qualifiedCount = 0;
+    for (const row of refsRes.rows) {
+      const qualifies = row.day1_ads >= MAX_DAILY_ADS && row.day2_ads >= MAX_DAILY_ADS && row.channel_joined;
+      if (qualifies && !row.is_qualified) {
+        await pool.query("UPDATE referrals SET is_qualified = TRUE, qualified_at = NOW() WHERE referrer_id = $1 AND referred_id = $2", [uid, row.id]);
+        qualifiedCount++;
+      } else if (row.is_qualified) {
+        qualifiedCount++;
       }
-    } finally {
-      client.release();
     }
 
-    // ታስኮች (ኦፊሴላዊውን ቻናል ጨምሮ)
-    const tasksResult = await pool.query(
-      `SELECT t.*,
-              COALESCE(tc.completed, FALSE) AS completed,
-              (tc.task_id IS NOT NULL AND tc.completed = FALSE) AS started
+    // Dynamic tasks excluding completed ones
+    const tasksRes = await pool.query(
+      `SELECT t.*, tc.completed
        FROM tasks t
        LEFT JOIN task_completions tc ON tc.task_id = t.id AND tc.telegram_id = $1
-       WHERE t.active = TRUE
-       ORDER BY t.sort_order ASC, t.created_at ASC`,
-      [telegramId]
+       WHERE t.active = TRUE AND (tc.completed IS NULL OR tc.completed = FALSE)
+       ORDER BY t.sort_order ASC`,
+      [uid]
     );
 
-    // ንቁ ሪፈራሎች (2 ቀን ሙሉ አድስ ያዩ እና ቻናል የገቡ)
-    const activeRefResult = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM referrals WHERE referrer_id = $1 AND is_active = TRUE`,
-      [telegramId]
-    );
-
-    const totalRefResult = await pool.query(
-      `SELECT COUNT(*)::int AS count FROM referrals WHERE referrer_id = $1`,
-      [telegramId]
-    );
-
-    const activeCount = Number(activeRefResult.rows[0].count);
-    const channelJoined = await checkChannelMembership(telegramId, OFFICIAL_CHANNEL);
-
-    const requirements = [
-      { text: `ቢያንስ ${MIN_WITHDRAW} ETB ሂሳብ ሊኖርዎት ይገባል`, completed: Number(user.balance) >= MIN_WITHDRAW },
-      { text: `10 ንቁ ጓደኞችን መጋበዝ (የሁለት ቀን አድስ ያዩ) (${activeCount}/10)`, completed: activeCount >= MIN_ACTIVE_REFERRALS },
-      { text: "ኦፊሴላዊ የቴሌግራም ቻናላችንን መቀላቀል", completed: channelJoined }
-    ];
-
-    const historyResult = await pool.query(
-      `SELECT id, amount, method, status, created_at FROM withdrawals WHERE telegram_id = $1 ORDER BY created_at DESC LIMIT 30`,
-      [telegramId]
+    // Withdrawal History
+    const historyRes = await pool.query(
+      "SELECT id, amount, method, account_number, status, created_at FROM withdrawals WHERE telegram_id = $1 ORDER BY created_at DESC LIMIT 20",
+      [uid]
     );
 
     res.json({
@@ -412,25 +285,28 @@ app.get("/api/me", authenticate, async (req, res) => {
         username: user.username,
         firstName: user.first_name,
         photoUrl: user.photo_url,
+        referralCode: user.referral_code,
         botUsername: BOT_USERNAME,
-        isAdmin: ADMIN_TELEGRAM_IDS.includes(Number(user.telegram_id))
+        isAdmin: Number(user.telegram_id) === ADMIN_TELEGRAM_ID
       },
       balance: Number(user.balance),
-      streak: user.streak,
-      streakDays: {
-        todayChecked: isToday(user.last_checkin_date)
-      },
-      todayEarned: await getTodayEarned(telegramId),
-      referrals: Number(totalRefResult.rows[0].count),
-      activeReferrals: activeCount,
-      referralCode: user.referral_code,
-      referralReward: REFERRAL_REWARD,
-      ads: {
-        todayCount: Number(user.today_ads_count),
-        limit: DAILY_AD_LIMIT,
-        reward: AD_REWARD
-      },
-      tasks: tasksResult.rows.map((t) => ({
+      todayAdsWatched,
+      maxDailyAds: MAX_DAILY_ADS,
+      adReward: AD_REWARD,
+      spinsAvailable: user.spins_available,
+      channelVerified: isChannelMember,
+      officialChannelUsername: MANDATORY_CHANNEL,
+      qualifiedReferralsCount: qualifiedCount,
+      totalReferralsCount: refsRes.rowCount,
+      referralsList: refsRes.rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        channelJoined: r.channel_joined,
+        day1Ads: r.day1_ads,
+        day2Ads: r.day2_ads,
+        isQualified: r.is_qualified
+      })),
+      tasks: tasksRes.rows.map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
@@ -438,238 +314,199 @@ app.get("/api/me", authenticate, async (req, res) => {
         type: t.type,
         reward: Number(t.reward),
         url: t.url,
-        completed: t.completed,
-        started: Boolean(t.started)
+        completed: false
       })),
-      withdrawalRequirements: requirements,
-      paymentMethods: [
-        { id: "telebirr", name: "Telebirr" },
-        { id: "cbe", name: "CBE (የኢትዮጵያ ንግድ ባንክ)" }
-      ],
-      withdrawalHistory: historyResult.rows.map((i) => ({
-        id: i.id,
-        amount: Number(i.amount),
-        method: i.method,
-        status: i.status,
-        createdAt: new Date(i.created_at).toLocaleString()
+      withdrawalHistory: historyRes.rows.map(h => ({
+        id: h.id,
+        amount: Number(h.amount),
+        method: h.method,
+        account: h.account_number,
+        status: h.status,
+        createdAt: h.created_at
       }))
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false, message: "መረጃዎችን መጫን አልተቻለም።" });
+    res.status(500).json({ ok: false, message: "Failed to load account profile." });
   }
 });
 
-/* =========================================================
-DAILY CHECK-IN
-========================================================= */
-
-app.post("/api/check-in", authenticate, async (req, res) => {
-  const telegramId = req.telegramUser.id;
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const result = await client.query(`SELECT * FROM users WHERE telegram_id = $1 FOR UPDATE`, [telegramId]);
-    const user = result.rows[0];
-
-    if (isToday(user.last_checkin_date)) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ ok: false, message: "የዛሬውን ቦነስ ከዚህ በፊት ወስደዋል።" });
-    }
-
-    const yesterday = getYesterdayUTC();
-    const lastDate = user.last_checkin_date ? formatDate(user.last_checkin_date) : null;
-    const isConsecutive = lastDate === yesterday;
-
-    let streak = isConsecutive ? Number(user.streak) + 1 : 1;
-    if (streak > 7) streak = 1;
-
-    const rewardKey = `checkin_day_${streak}`;
-    const reward = Number(await getSetting(rewardKey, 2));
-    const before = Number(user.balance);
-    const after = before + reward;
-
-    await client.query(
-      `UPDATE users
-       SET balance = $2, streak = $3, last_checkin_date = CURRENT_DATE, total_earned = total_earned + $4, updated_at = NOW()
-       WHERE telegram_id = $1`,
-      [telegramId, after, streak, reward]
-    );
-
-    await client.query(
-      `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
-       VALUES ($1, 'checkin', $2, $3, $4, $5, $6)`,
-      [telegramId, reward, before, after, `checkin_${Date.now()}`, `Daily check-in day ${streak}`]
-    );
-
-    await client.query("COMMIT");
-    res.json({ ok: true, reward, streak, balance: after, message: `+${reward} ETB የቀን ቦነስ አግኝተዋል!` });
-  } catch (error) {
-    await client.query("ROLLBACK");
-    console.error(error);
-    res.status(500).json({ ok: false, message: "Check-in አልተሳካም።" });
-  } finally {
-    client.release();
-  }
-});
-
-/* =========================================================
-WATCH ADS API (0.5 ETB - Limit 30/day)
-========================================================= */
-
-app.post("/api/ads/view", authenticate, async (req, res) => {
-  const telegramId = req.telegramUser.id;
+/* 2. Secure Ad Reward Processing with Anti-Cheat */
+app.post("/api/ads/claim", authenticate, async (req, res) => {
+  const uid = req.telegramUser.id;
+  const ip = req.clientIp;
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
 
-    const uRes = await client.query(`SELECT * FROM users WHERE telegram_id = $1 FOR UPDATE`, [telegramId]);
-    const user = uRes.rows[0];
-
-    const today = new Date().toISOString().slice(0, 10);
-    const lastAdDate = user.last_ad_date ? new Date(user.last_ad_date).toISOString().slice(0, 10) : null;
-
-    let todayCount = Number(user.today_ads_count);
-    if (lastAdDate !== today) {
-      todayCount = 0;
+    // Anti-Cheat: 20 Seconds Cooldown verification
+    const lastAd = await client.query(
+      "SELECT watched_at FROM ad_logs WHERE telegram_id = $1 ORDER BY watched_at DESC LIMIT 1",
+      [uid]
+    );
+    if (lastAd.rowCount > 0) {
+      const diffSec = (Date.now() - new Date(lastAd.rows[0].watched_at).getTime()) / 1000;
+      if (diffSec < AD_COOLDOWN_SECONDS) {
+        await client.query("ROLLBACK");
+        return res.status(429).json({
+          ok: false,
+          message: `Anti-cheat: Please wait ${Math.ceil(AD_COOLDOWN_SECONDS - diffSec)} more seconds.`
+        });
+      }
     }
 
-    if (todayCount >= DAILY_AD_LIMIT) {
+    // Daily 30 Ads Limiter
+    const progress = await client.query(
+      `INSERT INTO daily_ad_progress (telegram_id, ad_date, ads_watched)
+       VALUES ($1, CURRENT_DATE, 1)
+       ON CONFLICT (telegram_id, ad_date)
+       DO UPDATE SET ads_watched = daily_ad_progress.ads_watched + 1, updated_at = NOW()
+       RETURNING ads_watched`,
+      [uid]
+    );
+
+    const watched = progress.rows[0].ads_watched;
+    if (watched > MAX_DAILY_ADS) {
       await client.query("ROLLBACK");
-      return res.status(400).json({ ok: false, message: "የዛሬውን 30 ማስታወቂያዎች ጨርሰዋል። እባክዎ ነገ ይመለሱ!" });
+      return res.status(400).json({ ok: false, message: "Daily limit reached (30/30 Ads)." });
     }
 
-    todayCount += 1;
-    let fullDays = Number(user.full_ad_days_count);
-
-    // 30ኛውን ማስታወቂያ ዛሬ ሲያጠናቅቅ እንደ 1 ሙሉ ቀን ይቆጠርለታል
-    if (todayCount === DAILY_AD_LIMIT) {
-      fullDays += 1;
-    }
-
-    const before = Number(user.balance);
+    // Award Balance
+    const userRes = await client.query("SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE", [uid]);
+    const before = Number(userRes.rows[0].balance);
     const after = before + AD_REWARD;
 
+    // Grant 1 Free Spin for every 10 ads completed
+    let addSpin = false;
+    if (watched % 10 === 0) addSpin = true;
+
     await client.query(
-      `UPDATE users
-       SET balance = $2,
-           today_ads_count = $3,
-           last_ad_date = CURRENT_DATE,
-           full_ad_days_count = $4,
-           total_earned = total_earned + $5,
+      `UPDATE users 
+       SET balance = $2, 
+           total_earned = total_earned + $3, 
+           spins_available = spins_available + $4,
            updated_at = NOW()
        WHERE telegram_id = $1`,
-      [telegramId, after, todayCount, fullDays, AD_REWARD]
+      [uid, after, AD_REWARD, addSpin ? 1 : 0]
+    );
+
+    // Log Ad Audit
+    await client.query(
+      "INSERT INTO ad_logs (telegram_id, reward, ip_address) VALUES ($1, $2, $3)",
+      [uid, AD_REWARD, ip]
     );
 
     await client.query(
       `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
-       VALUES ($1, 'ad_reward', $2, $3, $4, $5, $6)`,
-      [telegramId, AD_REWARD, before, after, `ad_${Date.now()}`, `Monetag Ad (${todayCount}/${DAILY_AD_LIMIT})`]
+       VALUES ($1, 'ad_reward', $2, $3, $4, $5, 'Rewarded Ad Bonus')`,
+      [uid, AD_REWARD, before, after, `ad_${Date.now()}`]
     );
 
-    // ይህ ተጠቃሚ በሌላ ሰው ተጋብዞ ከሆነ 2 ቀን ማየቱን ቼክ አድርጎ ጋባዡን መሸለም
-    await checkReferralActivation(client, telegramId);
-
     await client.query("COMMIT");
-
     res.json({
       ok: true,
       reward: AD_REWARD,
       balance: after,
-      todayAdsCount: todayCount,
-      message: `+${AD_REWARD} ETB አግኝተዋል! (${todayCount}/${DAILY_AD_LIMIT})`
+      adsWatched: watched,
+      spinEarned: addSpin,
+      message: `+${AD_REWARD} ETB credited! (${watched}/30 ads)`
     });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
-    res.status(500).json({ ok: false, message: "ማስታወቂያውን መመዝገብ አልተቻለም።" });
+    res.status(500).json({ ok: false, message: err.message || "Failed to process ad credit." });
   } finally {
     client.release();
   }
 });
 
-/* =========================================================
-COMPLETE TASK
-========================================================= */
+/* 3. Spin & Win Lucky Wheel */
+app.post("/api/spin/execute", authenticate, async (req, res) => {
+  const uid = req.telegramUser.id;
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const uRes = await client.query("SELECT balance, spins_available FROM users WHERE telegram_id = $1 FOR UPDATE", [uid]);
+    const spins = Number(uRes.rows[0].spins_available);
 
+    if (spins <= 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ ok: false, message: "No free spins available. Watch 10 ads to earn a spin!" });
+    }
+
+    const prizes = [0.20, 0.50, 1.00, 2.00, 5.00];
+    const prize = prizes[Math.floor(Math.random() * prizes.length)];
+
+    const before = Number(uRes.rows[0].balance);
+    const after = before + prize;
+
+    await client.query(
+      `UPDATE users 
+       SET balance = $2, total_earned = total_earned + $3, spins_available = spins_available - 1, updated_at = NOW() 
+       WHERE telegram_id = $1`,
+      [uid, after, prize]
+    );
+
+    await client.query(
+      `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
+       VALUES ($1, 'spin', $2, $3, $4, $5, 'Lucky Spin Reward')`,
+      [uid, prize, before, after, `spin_${Date.now()}`]
+    );
+
+    await client.query("COMMIT");
+    res.json({ ok: true, prize, balance: after });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(500).json({ ok: false, message: "Spin execution error." });
+  } finally {
+    client.release();
+  }
+});
+
+/* 4. Complete Dynamic Task (Self-Destruct on completion) */
 app.post("/api/tasks/:id/complete", authenticate, async (req, res) => {
   const taskId = req.params.id;
-  const telegramId = req.telegramUser.id;
+  const uid = req.telegramUser.id;
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
-    const tRes = await client.query(`SELECT * FROM tasks WHERE id = $1 AND active = TRUE FOR UPDATE`, [taskId]);
-    if (tRes.rowCount === 0) throw new Error("ታስኩ አልተገኘም።");
-    const task = tRes.rows[0];
+    const taskRes = await client.query("SELECT * FROM tasks WHERE id = $1 AND active = TRUE", [taskId]);
+    if (taskRes.rowCount === 0) throw new Error("Task not found or expired.");
 
-    const cRes = await client.query(
-      `SELECT * FROM task_completions WHERE task_id = $1 AND telegram_id = $2 FOR UPDATE`,
-      [taskId, telegramId]
+    const task = taskRes.rows[0];
+
+    // If channel task, check membership live
+    if (task.type === "channel" && task.channel_username) {
+      const joined = await checkTelegramChannelMembership(uid, task.channel_username);
+      if (!joined) throw new Error("Please join the channel before verifying.");
+    }
+
+    // Insert completion (removes task from UI on refresh)
+    await client.query(
+      `INSERT INTO task_completions (task_id, telegram_id, completed) VALUES ($1, $2, TRUE)
+       ON CONFLICT (task_id, telegram_id) DO UPDATE SET completed = TRUE`,
+      [taskId, uid]
     );
-    if (cRes.rowCount > 0 && cRes.rows[0].completed) throw new Error("ይህንን ታስክ ከዚህ በፊት አጠናቀዋል።");
-
-    if (task.type === "channel") {
-      const channel = task.channel_username || OFFICIAL_CHANNEL;
-      const joined = await checkChannelMembership(telegramId, channel);
-      if (!joined) throw new Error("እባክዎ መጀመሪያ ቻናላችንን ይቀላቀሉ!");
-    }
-
-    if (task.type === "visit") {
-      const startedRow = cRes.rows[0];
-      if (!startedRow) {
-        await client.query(
-          `INSERT INTO task_completions (task_id, telegram_id, progress, completed) VALUES ($1, $2, 0, FALSE)`,
-          [taskId, telegramId]
-        );
-        await client.query("COMMIT");
-        return res.json({
-          ok: true,
-          completed: false,
-          url: task.url || null,
-          message: `Open the link, then come back after ${VISIT_MIN_SECONDS} seconds and tap Claim.`
-        });
-      }
-
-      const elapsed = (Date.now() - new Date(startedRow.created_at).getTime()) / 1000;
-      if (elapsed < VISIT_MIN_SECONDS) {
-        await client.query("ROLLBACK");
-        return res.status(400).json({
-          ok: false,
-          message: `Please wait ${Math.ceil(VISIT_MIN_SECONDS - elapsed)} more seconds.`
-        });
-      }
-    }
 
     const reward = Number(task.reward);
-    const uRes = await client.query(`SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE`, [telegramId]);
+    const uRes = await client.query("SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE", [uid]);
     const before = Number(uRes.rows[0].balance);
     const after = before + reward;
 
     await client.query(
-      `INSERT INTO task_completions (task_id, telegram_id, progress, completed) VALUES ($1, $2, 1, TRUE)
-       ON CONFLICT (task_id, telegram_id) DO UPDATE SET completed = TRUE, updated_at = NOW()`,
-      [taskId, telegramId]
-    );
-
-    await client.query(
-      `UPDATE users SET balance = $2, total_earned = total_earned + $3, updated_at = NOW() WHERE telegram_id = $1`,
-      [telegramId, after, reward]
+      "UPDATE users SET balance = $2, total_earned = total_earned + $3 WHERE telegram_id = $1",
+      [uid, after, reward]
     );
 
     await client.query(
       `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
        VALUES ($1, 'task', $2, $3, $4, $5, $6)`,
-      [telegramId, reward, before, after, `task_${task.id}`, task.title]
+      [uid, reward, before, after, `task_${taskId}`, task.title]
     );
 
-    // ቻናል ሲቀላቀል ሪፈራል ብቁነቱን ቼክ ማድረግ
-    await checkReferralActivation(client, telegramId);
-
     await client.query("COMMIT");
-    res.json({ ok: true, reward, balance: after, message: `ታስኩን ስላጠናቀቁ +${reward} ETB አግኝተዋል!` });
+    res.json({ ok: true, reward, balance: after, message: `Task completed! +${reward} ETB` });
   } catch (err) {
     await client.query("ROLLBACK");
     res.status(400).json({ ok: false, message: err.message });
@@ -678,141 +515,125 @@ app.post("/api/tasks/:id/complete", authenticate, async (req, res) => {
   }
 });
 
-/* =========================================================
-PROMO CODE REDEEM
-========================================================= */
-
+/* 5. Redeem Promo Code */
 app.post("/api/promo/redeem", authenticate, async (req, res) => {
-  const telegramId = req.telegramUser.id;
   const code = String(req.body.code || "").trim().toUpperCase();
-
-  if (!code) return res.status(400).json({ ok: false, message: "Promo code ያስገቡ።" });
-
+  const uid = req.telegramUser.id;
   const client = await pool.connect();
+
   try {
     await client.query("BEGIN");
-
-    const promoRes = await client.query(
-      `SELECT * FROM promo_codes WHERE code = $1 AND active = TRUE FOR UPDATE`,
-      [code]
-    );
-
-    if (promoRes.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return res.status(404).json({ ok: false, message: "የተሳሳተ ወይም ያልነቃ Promo code ነው።" });
-    }
+    const promoRes = await client.query("SELECT * FROM promo_codes WHERE code = $1 AND active = TRUE FOR UPDATE", [code]);
+    if (promoRes.rowCount === 0) throw new Error("Invalid or expired promo code.");
 
     const promo = promoRes.rows[0];
+    if (promo.max_uses && promo.used_count >= promo.max_uses) throw new Error("This promo code has reached its usage limit.");
 
-    if (promo.expires_at && new Date(promo.expires_at) < new Date()) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ ok: false, message: "የዚህ Promo code ጊዜ አልቋል።" });
-    }
-
-    if (promo.max_uses && promo.used_count >= promo.max_uses) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ ok: false, message: "ይህ Promo code ገደቡ ላይ ደርሷል።" });
-    }
-
-    const checkRedemption = await client.query(
-      `SELECT id FROM promo_redemptions WHERE code = $1 AND telegram_id = $2`,
-      [code, telegramId]
-    );
-
-    if (checkRedemption.rowCount > 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ ok: false, message: "ይህንን Promo code ከዚህ በፊት ተጠቅመውበታል።" });
-    }
+    const usedCheck = await client.query("SELECT id FROM promo_redemptions WHERE code = $1 AND telegram_id = $2", [code, uid]);
+    if (usedCheck.rowCount > 0) throw new Error("You have already claimed this promo code.");
 
     const reward = Number(promo.reward);
-    const userRes = await client.query(`SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE`, [telegramId]);
-    const before = Number(userRes.rows[0].balance);
+    const uRes = await client.query("SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE", [uid]);
+    const before = Number(uRes.rows[0].balance);
     const after = before + reward;
 
-    await client.query(
-      `UPDATE users SET balance = $2, total_earned = total_earned + $3, updated_at = NOW() WHERE telegram_id = $1`,
-      [telegramId, after, reward]
-    );
-
-    await client.query(`INSERT INTO promo_redemptions (code, telegram_id) VALUES ($1, $2)`, [code, telegramId]);
-    await client.query(`UPDATE promo_codes SET used_count = used_count + 1 WHERE code = $1`, [code]);
+    await client.query("UPDATE users SET balance = $2, total_earned = total_earned + $3 WHERE telegram_id = $1", [uid, after, reward]);
+    await client.query("INSERT INTO promo_redemptions (code, telegram_id) VALUES ($1, $2)", [code, uid]);
+    await client.query("UPDATE promo_codes SET used_count = used_count + 1 WHERE code = $1", [code]);
 
     await client.query(
       `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
        VALUES ($1, 'promo', $2, $3, $4, $5, $6)`,
-      [telegramId, reward, before, after, `promo_${code}`, `Redeemed promo: ${code}`]
+      [uid, reward, before, after, `promo_${code}`, `Claimed Promo: ${code}`]
     );
 
     await client.query("COMMIT");
-    res.json({ ok: true, reward, balance: after, message: `እንኳን ደስ አለዎት! +${reward} ETB ቦነስ አግኝተዋል።` });
+    res.json({ ok: true, reward, balance: after, message: `Promo applied! +${reward} ETB received.` });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
-    res.status(500).json({ ok: false, message: "Promo code መጠቀም አልተቻለም።" });
+    res.status(400).json({ ok: false, message: err.message });
   } finally {
     client.release();
   }
 });
 
-/* =========================================================
-WITHDRAWAL REQUEST
-========================================================= */
-
+/* 6. Strict Withdrawal Request with Fraud Score */
 app.post("/api/withdraw", authenticate, async (req, res) => {
-  const telegramId = req.telegramUser.id;
+  const uid = req.telegramUser.id;
   const amount = Number(req.body.amount);
   const method = String(req.body.method || "").toLowerCase();
   const account = String(req.body.account || "").trim();
-
-  if (!amount || amount < MIN_WITHDRAW) {
-    return res.status(400).json({ ok: false, message: `ዝቅተኛው የማውጫ መጠን ${MIN_WITHDRAW} ETB ነው።` });
-  }
-
+  const ip = req.clientIp;
   const client = await pool.connect();
+
   try {
     await client.query("BEGIN");
-    const uRes = await client.query(`SELECT * FROM users WHERE telegram_id = $1 FOR UPDATE`, [telegramId]);
-    const user = uRes.rows[0];
 
-    if (amount > Number(user.balance)) throw new Error("በቂ ሂሳብ የለዎትም።");
+    // Real-time Channel Verification check
+    const isMember = await checkTelegramChannelMembership(uid, MANDATORY_CHANNEL);
+    if (!isMember) throw new Error("Action blocked: You must be an active member of @proof_chnallel.");
 
-    // 1. 10 ንቁ ሪፈራሎች (2 ቀን አድስ ያዩ) መኖራቸውን ማረጋገጥ
-    const refRes = await client.query(
-      `SELECT COUNT(*)::int AS count FROM referrals WHERE referrer_id = $1 AND is_active = TRUE`,
-      [telegramId]
+    if (amount < MIN_WITHDRAW) throw new Error(`Minimum withdrawal is ${MIN_WITHDRAW} ETB.`);
+    if (account.length < 6) throw new Error("Please provide a valid account or phone number.");
+
+    // Check Qualified Referrals count (Must have Day 1 & Day 2 completed)
+    const qualRes = await client.query(
+      "SELECT COUNT(*)::int AS count FROM referrals WHERE referrer_id = $1 AND is_qualified = TRUE",
+      [uid]
     );
-    const activeCount = Number(refRes.rows[0].count);
-
-    if (activeCount < MIN_ACTIVE_REFERRALS) {
-      throw new Error(`ገንዘብ ለማውጣት ቢያንስ 10 ንቁ ጓደኞች ሊኖሩዎት ይገባል (እስካሁን ያሉት: ${activeCount}/10)።`);
+    if (qualRes.rows[0].count < REQUIRED_QUALIFIED_REFS) {
+      throw new Error(`You need at least ${REQUIRED_QUALIFIED_REFS} Qualified Referrals (2 full days of ads completed).`);
     }
 
-    // 2. ኦፊሴላዊውን ቻናል መቀላቀላቸውን ማረጋገጥ
-    const channelJoined = await checkChannelMembership(telegramId, OFFICIAL_CHANNEL);
-    if (!channelJoined) {
-      throw new Error("ገንዘብ ለማውጣት ኦፊሴላዊ የቴሌግራም ቻናላችንን መቀላቀል አለብዎት!");
-    }
-
+    const uRes = await client.query("SELECT balance, username, first_name FROM users WHERE telegram_id = $1 FOR UPDATE", [uid]);
+    const user = uRes.rows[0];
     const before = Number(user.balance);
+    if (amount > before) throw new Error("Insufficient balance.");
+
+    // Calculate Fraud Risk Score (IP Clustering check)
+    let riskScore = 0;
+    let riskReason = "Safe";
+    const sameIpRefs = await client.query(
+      "SELECT COUNT(*)::int AS count FROM users WHERE registration_ip = $1 AND referred_by = $2",
+      [ip, uid]
+    );
+    if (sameIpRefs.rows[0].count > 3) {
+      riskScore = 85;
+      riskReason = `⚠️ High Risk: ${sameIpRefs.rows[0].count} referrals share the same IP address!`;
+    }
+
     const after = before - amount;
+    await client.query("UPDATE users SET balance = $2 WHERE telegram_id = $1", [uid, after]);
 
-    await client.query(`UPDATE users SET balance = $2, updated_at = NOW() WHERE telegram_id = $1`, [telegramId, after]);
-
-    const withdrawalId = crypto.randomUUID();
+    const wId = crypto.randomUUID();
     await client.query(
-      `INSERT INTO withdrawals (id, telegram_id, amount, method, account_number, status)
-       VALUES ($1, $2, $3, $4, $5, 'pending')`,
-      [withdrawalId, telegramId, amount, method, account]
+      `INSERT INTO withdrawals (id, telegram_id, amount, method, account_number, status, risk_score, risk_reason)
+       VALUES ($1, $2, $3, $4, $5, 'pending', $6, $7)`,
+      [wId, uid, amount, method, account, riskScore, riskReason]
     );
 
     await client.query(
       `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
-       VALUES ($1, 'withdrawal_hold', $2, $3, $4, $5, $6)`,
-      [telegramId, -amount, before, after, withdrawalId, "Withdrawal Request"]
+       VALUES ($1, 'withdrawal_hold', $2, $3, $4, $5, 'Pending Withdrawal Hold')`,
+      [uid, -amount, before, after, wId]
     );
 
+    // Send Instant Telegram Notification to Admin
+    const adminAlertMsg = `🔔 *New Payout Request on Adewa!*\n\n` +
+      `👤 *User:* ${user.first_name || user.username || uid} (\`${uid}\`)\n` +
+      `💰 *Amount:* ${amount} ETB\n` +
+      `💳 *Method:* ${method.toUpperCase()} (${account})\n` +
+      `🛡️ *Fraud Risk:* ${riskScore > 50 ? "⚠️ High Risk (" + riskReason + ")" : "✅ Clean"}\n\n` +
+      `Review & approve in the Admin Panel.`;
+
+    telegramBotCall("sendMessage", {
+      chat_id: ADMIN_TELEGRAM_ID,
+      text: adminAlertMsg,
+      parse_mode: "Markdown"
+    }).catch(() => {});
+
     await client.query("COMMIT");
-    res.json({ ok: true, balance: after, message: "የማውጣት ጥያቄዎ በተሳካ ሁኔታ ቀርቧል! በአጭር ጊዜ ውስጥ ይላክልዎታል።" });
+    res.json({ ok: true, message: "Withdrawal submitted for admin review." });
   } catch (err) {
     await client.query("ROLLBACK");
     res.status(400).json({ ok: false, message: err.message });
@@ -822,63 +643,126 @@ app.post("/api/withdraw", authenticate, async (req, res) => {
 });
 
 /* =========================================================
-ADMIN ENDPOINTS
-========================================================= */
+   ADMIN PANEL SUITE (ID: 8845432223)
+   ========================================================= */
 
-app.get("/api/admin/withdrawals", adminAuth, async (req, res) => {
+app.get("/api/admin/overview", adminOnly, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT w.*, u.username, u.first_name
-       FROM withdrawals w
-       JOIN users u ON u.telegram_id = w.telegram_id
-       ORDER BY w.created_at DESC LIMIT 100`
+    const pendingRes = await pool.query(
+      `SELECT w.*, u.username, u.first_name 
+       FROM withdrawals w 
+       JOIN users u ON u.telegram_id = w.telegram_id 
+       WHERE w.status = 'pending' 
+       ORDER BY w.created_at DESC`
     );
-    res.json({ ok: true, withdrawals: result.rows });
-  } catch (error) {
-    res.status(500).json({ ok: false, message: "መረጃውን ማግኘት አልተቻለም።" });
+    const usersCount = await pool.query("SELECT COUNT(*)::int AS count FROM users");
+
+    res.json({
+      ok: true,
+      pendingCount: pendingRes.rowCount,
+      totalUsers: usersCount.rows[0].count,
+      requests: pendingRes.rows.map(r => ({
+        id: r.id,
+        telegramId: r.telegram_id,
+        username: r.username || r.first_name,
+        amount: Number(r.amount),
+        method: r.method,
+        account: r.account_number,
+        status: r.status,
+        riskScore: r.risk_score,
+        riskReason: r.risk_reason
+      }))
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
   }
 });
 
-app.post("/api/admin/withdrawals/:id/action", adminAuth, async (req, res) => {
+/* Approve with Screenshot Upload & Telegram Broadcast Pipeline */
+app.post("/api/admin/withdrawals/:id/approve-proof", adminOnly, upload.single("photo"), async (req, res) => {
+  const wId = req.params.id;
+  const note = req.body.note || "Transfer Completed";
+  const file = req.file;
+
+  if (!file) return res.status(400).json({ ok: false, message: "Transfer receipt photo is required." });
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const wRes = await client.query("SELECT * FROM withdrawals WHERE id = $1 FOR UPDATE", [wId]);
+    if (wRes.rowCount === 0) throw new Error("Withdrawal request not found.");
+
+    const w = wRes.rows[0];
+    if (w.status !== "pending") throw new Error("Withdrawal already processed.");
+
+    // Update Withdrawal status to Paid
+    await client.query(
+      "UPDATE withdrawals SET status = 'paid', admin_note = $2, processed_at = NOW() WHERE id = $1",
+      [wId, note]
+    );
+    await client.query(
+      "UPDATE users SET total_withdrawn = total_withdrawn + $2 WHERE telegram_id = $1",
+      [w.telegram_id, w.amount]
+    );
+
+    // Broadcast Receipt Screenshot to Proof Channel
+    const caption = `✅ *NEW WITHDRAWAL PAID!*\n\n` +
+      `💸 *Amount:* ${w.amount} ETB\n` +
+      `🏦 *Method:* ${w.method.toUpperCase()}\n` +
+      `👤 *User ID:* \`${String(w.telegram_id).slice(0, 4)}****\`\n` +
+      `📅 *Date:* ${new Date().toLocaleString()}\n` +
+      `📢 *Bot:* @${BOT_USERNAME}\n\n` +
+      `⚡ *Earn real cash daily by watching ads on Adewa!*`;
+
+    const formData = new FormData();
+    formData.append("chat_id", PROOF_CHANNEL_ID);
+    formData.append("caption", caption);
+    formData.append("parse_mode", "Markdown");
+    formData.append("photo", new Blob([file.buffer], { type: file.mimetype }), "proof.jpg");
+
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
+      method: "POST",
+      body: formData
+    });
+
+    await client.query("COMMIT");
+    res.json({ ok: true, message: "Approved & Broadcasted to Proof Channel!" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    res.status(400).json({ ok: false, message: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+/* Reject Withdrawal and Refund Balance */
+app.post("/api/admin/withdrawals/:id/action", adminOnly, async (req, res) => {
   const { id } = req.params;
-  const { action, note } = req.body;
+  const { action } = req.body;
   const client = await pool.connect();
 
   try {
     await client.query("BEGIN");
-    const wRes = await client.query(`SELECT * FROM withdrawals WHERE id = $1 FOR UPDATE`, [id]);
-    if (wRes.rowCount === 0) throw new Error("ጥያቄው አልተገኘም።");
-    const w = wRes.rows[0];
-    if (w.status !== "pending") throw new Error("ጥያቄው ከዚህ በፊት ተስተናግዷል።");
+    const wRes = await client.query("SELECT * FROM withdrawals WHERE id = $1 FOR UPDATE", [id]);
+    if (wRes.rowCount === 0) throw new Error("Request not found.");
 
-    if (action === "approve") {
-      await client.query(
-        `UPDATE withdrawals SET status = 'paid', admin_note = $2, processed_at = NOW() WHERE id = $1`,
-        [id, note || "Approved"]
-      );
-      await client.query(
-        `UPDATE users SET total_withdrawn = total_withdrawn + $2, updated_at = NOW() WHERE telegram_id = $1`,
-        [w.telegram_id, w.amount]
-      );
-    } else if (action === "reject") {
-      const uRes = await client.query(`SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE`, [w.telegram_id]);
+    const w = wRes.rows[0];
+    if (action === "reject") {
+      const uRes = await client.query("SELECT balance FROM users WHERE telegram_id = $1 FOR UPDATE", [w.telegram_id]);
       const before = Number(uRes.rows[0].balance);
       const after = before + Number(w.amount);
 
-      await client.query(`UPDATE users SET balance = $2, updated_at = NOW() WHERE telegram_id = $1`, [w.telegram_id, after]);
-      await client.query(
-        `UPDATE withdrawals SET status = 'rejected', admin_note = $2, processed_at = NOW() WHERE id = $1`,
-        [id, note || "Rejected"]
-      );
+      await client.query("UPDATE users SET balance = $2 WHERE telegram_id = $1", [w.telegram_id, after]);
+      await client.query("UPDATE withdrawals SET status = 'rejected', processed_at = NOW() WHERE id = $1", [id]);
       await client.query(
         `INSERT INTO transactions (telegram_id, type, amount, balance_before, balance_after, reference, description)
-         VALUES ($1, 'withdrawal_refund', $2, $3, $4, $5, $6)`,
-        [w.telegram_id, w.amount, before, after, id, "Refund for rejected withdrawal"]
+         VALUES ($1, 'withdrawal_refund', $2, $3, $4, $5, 'Refund for Rejected Withdrawal')`,
+        [w.telegram_id, w.amount, before, after, id]
       );
     }
 
     await client.query("COMMIT");
-    res.json({ ok: true, message: `ጥያቄው ${action} ሆኗል።` });
+    res.json({ ok: true, message: `Withdrawal successfully ${action}ed.` });
   } catch (err) {
     await client.query("ROLLBACK");
     res.status(400).json({ ok: false, message: err.message });
@@ -887,50 +771,52 @@ app.post("/api/admin/withdrawals/:id/action", adminAuth, async (req, res) => {
   }
 });
 
-/* =========================================================
-DATE & EARNING HELPERS
-========================================================= */
-
-async function getTodayEarned(telegramId) {
-  const result = await pool.query(
-    `SELECT COALESCE(SUM(amount), 0) AS total FROM transactions
-     WHERE telegram_id = $1 AND amount > 0 AND created_at >= CURRENT_DATE`,
-    [telegramId]
-  );
-  return Number(result.rows[0].total);
-}
-
-function formatDate(date) {
-  if (!date) return null;
-  return new Date(date).toISOString().slice(0, 10);
-}
-
-function getTodayUTC() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function getYesterdayUTC() {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() - 1);
-  return d.toISOString().slice(0, 10);
-}
-
-function isToday(date) {
-  if (!date) return false;
-  return formatDate(date) === getTodayUTC();
-}
-
-/* =========================================================
-ERROR HANDLER & LISTENER
-========================================================= */
-
-app.use((error, req, res, next) => {
-  console.error("SERVER ERROR:", error);
-  res.status(500).json({ ok: false, message: "Internal server error." });
+/* No-Code Task Publisher */
+app.post("/api/admin/tasks/create", adminOnly, async (req, res) => {
+  const { title, type, reward, url } = req.body;
+  try {
+    await pool.query(
+      "INSERT INTO tasks (title, type, reward, url, active) VALUES ($1, $2, $3, $4, TRUE)",
+      [title, type, reward, url || null]
+    );
+    res.json({ ok: true, message: "Task published." });
+  } catch (err) {
+    res.status(400).json({ ok: false, message: err.message });
+  }
 });
 
+/* Generate Promo Codes */
+app.post("/api/admin/promo/create", adminOnly, async (req, res) => {
+  const { code, reward, maxUses } = req.body;
+  try {
+    await pool.query(
+      "INSERT INTO promo_codes (code, reward, max_uses) VALUES ($1, $2, $3)",
+      [code.toUpperCase(), reward, maxUses || null]
+    );
+    res.json({ ok: true, message: `Promo code ${code} generated.` });
+  } catch (err) {
+    res.status(400).json({ ok: false, message: err.message });
+  }
+});
+
+/* Update Reward Configurations */
+app.post("/api/admin/settings/update", adminOnly, async (req, res) => {
+  const { referralReward, adReward } = req.body;
+  try {
+    if (referralReward) await pool.query("UPDATE settings SET value = $1 WHERE key = 'referral_reward'", [String(referralReward)]);
+    if (adReward) await pool.query("UPDATE settings SET value = $1 WHERE key = 'ad_reward'", [String(adReward)]);
+    res.json({ ok: true, message: "Settings updated." });
+  } catch (err) {
+    res.status(400).json({ ok: false, message: err.message });
+  }
+});
+
+/* =========================================================
+   START SERVER
+   ========================================================= */
+
 app.listen(PORT, () => {
-  console.log(`FulusApp Backend running on port ${PORT}`);
+  console.log(`Adewa Core Engine online on port ${PORT}`);
 });
 
 module.exports = app;
