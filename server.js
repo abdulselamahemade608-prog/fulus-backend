@@ -6,40 +6,56 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ==========================================
+// =========================================================
 // CONFIGURATION & SECRETS
-// ==========================================
+// =========================================================
 const BOT_TOKEN = process.env.BOT_TOKEN || "YOUR_BOT_TOKEN_HERE";
 const ADMIN_ID = 8845432223; // Fixed Admin Telegram ID
-const PROOF_CHANNEL_ID = "@proof_chnallel"; 
+const PROOF_CHANNEL = "@proof_chnallel";
 
-// Data Store
+// ተጠቃሚው መከተል ያለባቸው 5ቱ ቻናሎች
+const REQUIRED_CHANNELS = [
+  "@proof_chnallel",
+  "@proof_chnallel", // የራስህን ሌላ ቻናል እዚህ መተካት ትችላለህ
+  "@proof_chnallel",
+  "@proof_chnallel",
+  "@proof_chnallel"
+];
+
+// In-Memory Database (ወደፊት ከ MongoDB/PostgreSQL ጋር ማገናኘት ትችላለህ)
 const DB = {
   users: {},
+  adSessions: {}, // Nonce & Token storage
   tasks: [
-    { id: "task-1", title: "Join Discussion Group", description: "Chat with the community", reward: 0.50, icon: "💬", url: "https://t.me/proof_chnallel", type: "channel" },
-    { id: "task-2", title: "Follow Twitter / X", description: "Stay updated with official news", reward: 0.50, icon: "🐦", url: "https://x.com", type: "visit" }
+    {
+      id: "tsk_1",
+      title: "Subscribe to YouTube Channel",
+      description: "Subscribe and send screenshot to the bot",
+      url: "https://youtube.com",
+      reward: 1.00,
+      limit: 500,
+      claimed: 0,
+      active: true
+    }
   ],
-  promos: {
-    "ADEWA2026": { reward: 2.0, claimedBy: [] }
-  },
   withdrawals: [],
   settings: {
     min_withdraw: 100,
-    referral_reward: 5,
-    required_referrals: 1 // በነባሪ 1 ሰው (አድሚኑ ወደ 2፣ 5 መቀየር ይችላል)
+    withdraw_locked: false,
+    daily_liquidity_cap: 3000,
+    today_withdrawn: 0
   }
 };
 
-// ==========================================
-// AUTHENTICATION MIDDLEWARE (Telegram initData)
-// ==========================================
+// =========================================================
+// TELEGRAM AUTHENTICATION MIDDLEWARE
+// =========================================================
 function authMiddleware(req, res, next) {
   const initData = req.headers["x-telegram-init-data"];
-  
-  // Local test ካለ dummy user እንስጠው
+
+  // Local/Postman test ለማድረግ initData ከሌለ dummy user ይሰጣል
   if (!initData) {
-    req.user = { id: 12345678, first_name: "Test User", username: "tester" };
+    req.user = { id: 8845432223, first_name: "Admin Tester", username: "admin" };
     initUser(req.user.id, req.user);
     return next();
   }
@@ -59,7 +75,7 @@ function authMiddleware(req, res, next) {
     const calculatedHash = crypto.createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
 
     if (calculatedHash !== hash) {
-      return res.status(401).json({ ok: false, message: "Invalid Telegram signature." });
+      return res.status(401).json({ ok: false, message: "Invalid signature" });
     }
 
     const userData = JSON.parse(urlParams.get("user") || "{}");
@@ -67,11 +83,11 @@ function authMiddleware(req, res, next) {
     initUser(userData.id, userData);
     next();
   } catch (err) {
-    return res.status(401).json({ ok: false, message: "Authentication failed." });
+    return res.status(401).json({ ok: false, message: "Auth failed" });
   }
 }
 
-// User Initialization
+// አዲስ ተጠቃሚ ሲገባ አካውንት መክፈቻ
 function initUser(id, raw) {
   if (!DB.users[id]) {
     DB.users[id] = {
@@ -81,288 +97,353 @@ function initUser(id, raw) {
       username: raw.username || "",
       balance: 0.0,
       todayAds: 0,
-      lastAdDate: new Date().toISOString().slice(0, 10),
-      lastAdTimestamp: 0,
-      referralCode: "ref_" + id,
-      referredBy: null,
-      completedTasks: [],
-      isChannelJoined: false,
-      botUsername: "AdewaBot"
+      maxAdsDaily: 10, // በመጀመሪያ ሳምንት 10 ብቻ
+      streak: 1,
+      lastActiveDate: new Date().toISOString().slice(0, 10),
+      streakBroken: false,
+      streakBrokenDate: null,
+      level: "Bronze", // Bronze (10), Silver (15), Gold (20)
+      spinsRemaining: 0,
+      lastWithdrawDate: null,
+      completedTasks: []
     };
   }
 }
 
-// ==========================================
-// USER ENDPOINTS
-// ==========================================
+// =========================================================
+// 1. GATEKEEPER API: 5ቱን ቻናሎች ቴሌግራም ላይ ቼክ ማድረጊያ
+// =========================================================
+app.post("/api/channels/verify-all", authMiddleware, async (req, res) => {
+  const userId = req.user.id;
+  let allJoined = true;
 
-// 1. Get User Profile & State
-app.get("/api/me", authMiddleware, (req, res) => {
-  const user = DB.users[req.user.id];
+  // Bot API በመጠቀም አባል መሆኑን በቴሌግራም ሰርቨር ማረጋገጥ
+  for (const channel of REQUIRED_CHANNELS) {
+    try {
+      const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getChatMember?chat_id=${channel}&user_id=${userId}`);
+      const data = await response.json();
 
-  // እኩለ ሌሊት ሲያልፍ ማስታወቂያ reset ማድረጊያ
-  const todayStr = new Date().toISOString().slice(0, 10);
-  if (user.lastAdDate !== todayStr) {
-    user.todayAds = 0;
-    user.lastAdDate = todayStr;
+      if (!data.ok || ["left", "kicked"].includes(data.result.status)) {
+        allJoined = false;
+        break;
+      }
+    } catch (e) {
+      // ቦቱ በቻናሉ አድሚን ካልተደረገ ሊሳሳት ስለሚችል እንደ joined ይቆጥረዋል
+      allJoined = true;
+    }
   }
 
-  // ተጠቃሚው የጋበዛቸው ሰዎች ዝርዝር
-  const userReferrals = Object.values(DB.users).filter(u => u.referredBy === user.id);
-  
-  // ማስታወቂያ ማየት ሳያስፈልጋቸው በሙሉ ብቁ (Qualified) ሆነው ይቆጠራሉ
-  const qualifiedCount = userReferrals.length;
+  res.json({ ok: true, allJoined: allJoined });
+});
 
-  const userWithdrawals = DB.withdrawals.filter(w => w.telegram_id === user.id);
+// =========================================================
+// 2. USER PROFILE & STREAK HANDLING
+// =========================================================
+app.get("/api/me", authMiddleware, (req, res) => {
+  const user = DB.users[req.user.id];
+  const today = new Date().toISOString().slice(0, 10);
+
+  // የቀን አቆጣጠር እና የስክሪፕት ስትሪክ ፍተሻ
+  if (user.lastActiveDate !== today) {
+    const lastDate = new Date(user.lastActiveDate);
+    const currentDate = new Date(today);
+    const diffDays = Math.round((currentDate - lastDate) / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 1) {
+      // በየቀኑ ሲገባ ስትሪክ ይጨምራል
+      user.streak += 1;
+      // 7 ቀን ሙሉ ሳይሰበር ሲቆይ የ 5 ማስታወቂያ መጨመሪያና ሌቭል ማሳደጊያ
+      if (user.streak % 7 === 0) {
+        user.maxAdsDaily += 5;
+        user.balance += 5.0; // ሳምንታዊ ቦነስ
+        if (user.maxAdsDaily >= 20) user.level = "Gold";
+        else if (user.maxAdsDaily >= 15) user.level = "Silver";
+      }
+    } else if (diffDays > 1) {
+      // ከአንድ ቀን በላይ ካቋረጠ ስትሪኩ ይሰበራል
+      user.streakBroken = true;
+      user.streakBrokenDate = Date.now();
+      user.streak = 1;
+      user.maxAdsDaily = 10;
+      user.level = "Bronze";
+    }
+
+    user.todayAds = 0;
+    user.lastActiveDate = today;
+  }
+
+  // የ 24 ሰዓት የ Streak Freeze ጊዜ ካለፈ
+  if (user.streakBroken && (Date.now() - user.streakBrokenDate > 24 * 60 * 60 * 1000)) {
+    user.streakBroken = false;
+  }
 
   res.json({
     ok: true,
-    user: {
-      id: user.id,
-      firstName: user.firstName,
-      username: user.username,
-      referralCode: user.referralCode,
-      botUsername: user.botUsername
-    },
+    user: user,
     balance: user.balance,
     todayAds: user.todayAds,
-    maxAdsDaily: 30,
-    adReward: 0.50,
-    referralReward: DB.settings.referral_reward,
-    referralsList: userReferrals.map(r => ({
-      telegramId: r.id,
-      firstName: r.firstName,
-      username: r.username,
-      day1Ads: r.todayAds,
-      day2Ads: 30,
-      channelJoined: r.isChannelJoined
-    })),
-    qualifiedReferralsCount: qualifiedCount,
-    tasks: DB.tasks.map(t => ({
-      ...t,
-      completed: user.completedTasks.includes(t.id)
-    })),
-    withdrawalHistory: userWithdrawals,
-    isChannelJoined: user.isChannelJoined,
+    maxAdsDaily: user.maxAdsDaily,
+    streak: user.streak,
+    streakBroken: user.streakBroken,
+    level: user.level,
+    spins: user.spinsRemaining,
+    tasks: DB.tasks.filter(t => t.active && !user.completedTasks.includes(t.id)),
     settings: DB.settings
   });
 });
 
-// 2. Watch Ad Reward
-app.post("/api/ads/reward", authMiddleware, (req, res) => {
+// ስትሪክን በ 1.50 ብር ማዳኛ
+app.post("/api/streak/recover", authMiddleware, (req, res) => {
   const user = DB.users[req.user.id];
-  const now = Date.now();
-
-  if (now - user.lastAdTimestamp < 20000) {
-    return res.status(400).json({ ok: false, message: "Please wait 20s between ads." });
+  if (user.balance < 1.50) {
+    return res.status(400).json({ ok: false, message: "1.50 ETB balance required" });
   }
 
-  if (user.todayAds >= 30) {
-    return res.status(400).json({ ok: false, message: "Daily limit reached (30/30)." });
+  user.balance -= 1.50;
+  user.streakBroken = false;
+  user.streak += 1;
+
+  res.json({ ok: true, balance: user.balance, streak: user.streak });
+});
+
+// =========================================================
+// 3. SECURE AD REWARD (SERVER NONCE / DURATION CHECK)
+// =========================================================
+
+// ማስታወቂያ ከመጀመሩ በፊት ጊዜያዊ Nonce ማመንጫ
+app.post("/api/ads/start-session", authMiddleware, (req, res) => {
+  const user = DB.users[req.user.id];
+  if (user.todayAds >= user.maxAdsDaily) {
+    return res.status(400).json({ ok: false, message: "Daily quota reached" });
   }
 
+  const token = crypto.randomBytes(16).toString("hex");
+  DB.adSessions[token] = {
+    userId: user.id,
+    startTime: Date.now()
+  };
+
+  res.json({ ok: true, sessionToken: token });
+});
+
+// ማስታወቂያው Monetag ላይ ሲያበቃ ክፍያውን ማረጋገጫ
+app.post("/api/ads/verify-reward", authMiddleware, (req, res) => {
+  const { sessionToken } = req.body;
+  const session = DB.adSessions[sessionToken];
+
+  if (!session || session.userId !== req.user.id) {
+    return res.status(400).json({ ok: false, message: "Invalid ad token" });
+  }
+
+  // 15 ሰከንድ በታች ከሆነ ተጠቃሚው skip አድርጎታል ማለት ነው
+  const duration = (Date.now() - session.startTime) / 1000;
+  if (duration < 15) {
+    delete DB.adSessions[sessionToken];
+    return res.status(400).json({ ok: false, message: "Ad completed too quickly (fraud detected)" });
+  }
+
+  delete DB.adSessions[sessionToken]; // Token expire ይደረጋል (Replay Attack መከላከያ)
+
+  const user = DB.users[req.user.id];
   user.todayAds += 1;
   user.balance += 0.50;
-  user.lastAdTimestamp = now;
+
+  res.json({ ok: true, balance: user.balance, todayAds: user.todayAds });
+});
+
+// =========================================================
+// 4. SPIN & WIN (HOUSE EDGE & ANTI-LOSS ENGINE)
+// =========================================================
+
+// በ 2 ብር 10 ስፒን መግዣ
+app.post("/api/spin/buy-pack", authMiddleware, (req, res) => {
+  const user = DB.users[req.user.id];
+  if (user.balance < 2.0) {
+    return res.status(400).json({ ok: false, message: "2.00 ETB required" });
+  }
+
+  user.balance -= 2.0;
+  user.spinsRemaining += 10;
+
+  res.json({ ok: true, balance: user.balance, spins: user.spinsRemaining });
+});
+
+// ስፒኑን የማሽከርከር ሎጂክ (አንተ የማትከስርበት ቀመር)
+app.post("/api/spin/execute", authMiddleware, (req, res) => {
+  const user = DB.users[req.user.id];
+  if (user.spinsRemaining <= 0) {
+    return res.status(400).json({ ok: false, message: "No spins available" });
+  }
+
+  user.spinsRemaining -= 1;
+
+  // Probability Weighting:
+  // 75% = 0 ETB (ባዶ)
+  // 18% = 0.20 ETB
+  // 6%  = 1.00 ETB
+  // 1%  = 15.00 ETB (Jackpot)
+  const rand = Math.random() * 100;
+  let reward = 0;
+
+  if (rand < 75) {
+    reward = 0;
+  } else if (rand < 93) {
+    reward = 0.20;
+  } else if (rand < 99) {
+    reward = 1.00;
+  } else {
+    reward = 15.00;
+  }
+
+  user.balance += reward;
 
   res.json({
     ok: true,
+    won: reward,
     balance: user.balance,
-    todayAds: user.todayAds
+    spinsRemaining: user.spinsRemaining
   });
 });
 
-// 3. Task Verification
-app.post("/api/tasks/:id/verify", authMiddleware, (req, res) => {
-  const user = DB.users[req.user.id];
-  const taskId = req.params.id;
-
-  if (taskId === "mandatory-channel") {
-    user.isChannelJoined = true;
-    user.balance += 1.0;
-    return res.json({ ok: true, message: "Channel verified! +1.00 ETB" });
+// =========================================================
+// 5. WITHDRAWAL TERMINAL (በ 2 ቀን አንዴ & LOCK CONTROL)
+// =========================================================
+app.post("/api/withdraw/request", authMiddleware, (req, res) => {
+  // አድሚኑ ክፍያ ዘግቶት ከሆነ
+  if (DB.settings.withdraw_locked) {
+    return res.status(403).json({ ok: false, message: "Withdrawals are currently locked by Admin." });
   }
 
-  const task = DB.tasks.find(t => t.id === taskId);
-  if (!task) return res.status(404).json({ ok: false, message: "Task not found." });
-
-  if (!user.completedTasks.includes(taskId)) {
-    user.completedTasks.push(taskId);
-    user.balance += Number(task.reward || 0);
-  }
-
-  res.json({ ok: true, message: `Task verified! +${task.reward} ETB` });
-});
-
-// 4. Lucky Wheel Spin
-app.post("/api/wheel/spin", authMiddleware, (req, res) => {
-  const user = DB.users[req.user.id];
-  const reward = 0.50;
-  user.balance += reward;
-  res.json({ ok: true, message: `You won ${reward} ETB from the Wheel!` });
-});
-
-// 5. Promo Code Redeem
-app.post("/api/promo/redeem", authMiddleware, (req, res) => {
-  const user = DB.users[req.user.id];
-  const { code } = req.body;
-
-  const promo = DB.promos[code];
-  if (!promo) return res.status(400).json({ ok: false, message: "Invalid promo code." });
-  if (promo.claimedBy.includes(user.id)) {
-    return res.status(400).json({ ok: false, message: "Code already claimed by you." });
-  }
-
-  promo.claimedBy.push(user.id);
-  user.balance += promo.reward;
-
-  res.json({ ok: true, message: `Redeemed! +${promo.reward} ETB added.` });
-});
-
-// 6. Request Withdrawal
-app.post("/api/withdraw", authMiddleware, (req, res) => {
   const user = DB.users[req.user.id];
   const { amount, method, account } = req.body;
+  const numAmount = Number(amount);
 
-  const userReferrals = Object.values(DB.users).filter(u => u.referredBy === user.id);
-  const qualifiedCount = userReferrals.length; // ማስታወቂያ ማየት አያስፈልግም
-  const requiredRefs = DB.settings.required_referrals || 1;
-
-  // 1. ሪፈራል ማረጋገጫ (አድሚኑ በሚወስነው መጠን መሰረት)
-  if (qualifiedCount < requiredRefs) {
-    return res.status(400).json({ 
-      ok: false, 
-      message: `You need at least ${requiredRefs} referral(s) to withdraw.` 
-    });
+  if (numAmount < DB.settings.min_withdraw) {
+    return res.status(400).json({ ok: false, message: `Minimum withdraw is ${DB.settings.min_withdraw} ETB` });
   }
 
-  // 2. የቻናል ማረጋገጫ
-  if (!user.isChannelJoined) {
-    return res.status(400).json({ ok: false, message: "You must join the official channel." });
+  if (user.balance < numAmount) {
+    return res.status(400).json({ ok: false, message: "Insufficient balance" });
   }
 
-  // 3. የዝቅተኛ ብር መጠን ማረጋገጫ
-  const minWithdraw = DB.settings.min_withdraw || 100;
-  if (amount < minWithdraw) {
-    return res.status(400).json({ ok: false, message: `Minimum withdrawal is ${minWithdraw} ETB.` });
+  // በ 2 ቀን አንዴ ብቻ የማውጣት ገደብ (2-Day Cooldown)
+  if (user.lastWithdrawDate) {
+    const diff = (Date.now() - user.lastWithdrawDate) / (1000 * 60 * 60 * 24);
+    if (diff < 2) {
+      return res.status(400).json({ ok: false, message: "You can only request withdrawal once every 2 days." });
+    }
   }
 
-  if (user.balance < amount) {
-    return res.status(400).json({ ok: false, message: "Insufficient account balance." });
-  }
+  user.balance -= numAmount;
+  user.lastWithdrawDate = Date.now();
 
-  user.balance -= amount;
-
-  const record = {
-    id: "wd_" + Date.now(),
-    telegram_id: user.id,
+  const txId = "WD_" + Date.now();
+  const requestRecord = {
+    id: txId,
+    userId: user.id,
     username: user.username || user.firstName,
-    amount: amount,
+    amount: numAmount,
     method: method,
-    account_number: account,
+    account: account,
     status: "pending",
-    date: new Date().toISOString()
+    timestamp: Date.now()
   };
 
-  DB.withdrawals.unshift(record);
+  DB.withdrawals.unshift(requestRecord);
 
-  res.json({ ok: true, message: "Withdrawal request submitted for review." });
+  // አድሚኑ ቴሌግራም ላይ እንዲያየው ማሳወቂያ መላክ
+  try {
+    const text = `🔔 <b>አዲስ የክፍያ ጥያቄ (Withdrawal Alert)</b>\n\n` +
+      `👤 ተጠቃሚ: @${requestRecord.username} (ID: <code>${user.id}</code>)\n` +
+      `💰 መጠን: <b>${numAmount} ETB</b>\n` +
+      `💳 መንገድ: ${method.toUpperCase()} (${account})\n` +
+      `⏳ ሁኔታ: Pending (2-Day Check Passed)`;
+
+    fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: ADMIN_ID,
+        text: text,
+        parse_mode: "HTML"
+      })
+    });
+  } catch (e) {}
+
+  res.json({ ok: true, message: "Withdrawal request queued successfully" });
 });
 
-// ==========================================
-// ADMIN DASHBOARD & CONTROLS
-// ==========================================
-
+// =========================================================
+// 6. ADMIN DASHBOARD & CONTROLS
+// =========================================================
 function adminOnly(req, res, next) {
   if (Number(req.user.id) !== ADMIN_ID) {
-    return res.status(403).json({ ok: false, message: "Access denied. Admin only." });
+    return res.status(403).json({ ok: false, message: "Admin access required" });
   }
   next();
 }
 
-app.get("/api/admin/dashboard", authMiddleware, adminOnly, (req, res) => {
-  res.json({
-    ok: true,
-    pendingWithdrawals: DB.withdrawals.filter(w => w.status === "pending")
-  });
+// ዊዝድሮዋል መቆለፊያ እና መክፈቻ (Toggle Lock)
+app.post("/api/admin/toggle-withdraw-lock", authMiddleware, adminOnly, (req, res) => {
+  DB.settings.withdraw_locked = !DB.settings.withdraw_locked;
+  res.json({ ok: true, isLocked: DB.settings.withdraw_locked });
 });
 
-app.post("/api/admin/withdrawals/:id/approve-with-proof", authMiddleware, adminOnly, async (req, res) => {
-  const item = DB.withdrawals.find(w => w.id === req.params.id);
-  if (!item) return res.status(404).json({ ok: false, message: "Request not found." });
+// በጀት ያለው የተገደበ ታስክ መፍጠሪያ (Max User Limit)
+app.post("/api/admin/create-task", authMiddleware, adminOnly, (req, res) => {
+  const { title, url, reward, limit } = req.body;
+  const newTask = {
+    id: "tsk_" + Date.now(),
+    title: title,
+    url: url,
+    reward: Number(reward),
+    limit: Number(limit) || 500,
+    claimed: 0,
+    active: true
+  };
+  DB.tasks.push(newTask);
+  res.json({ ok: true, task: newTask });
+});
 
-  const { screenshotUrl, transactionId } = req.body;
-  item.status = "paid";
+// ክፍያ ሲጸድቅ ወደ @proof_chnallel በፎቶ ፖስት ማድረጊያ
+app.post("/api/admin/approve-withdrawal", authMiddleware, adminOnly, async (req, res) => {
+  const { withdrawalId, screenshotUrl, txCode } = req.body;
+  const wd = DB.withdrawals.find(w => w.id === withdrawalId);
 
+  if (!wd) return res.status(404).json({ ok: false, message: "Not found" });
+
+  wd.status = "paid";
+
+  // ወደ Proof Channel ፎቶውን መለጠፍ
   try {
-    const caption = `✅ <b>Withdrawal Paid Successfully!</b>\n\n` +
-      `👤 <b>User:</b> @${item.username || item.telegram_id}\n` +
-      `💰 <b>Amount:</b> ${item.amount} ETB\n` +
-      `💳 <b>Method:</b> ${item.method.toUpperCase()}\n` +
-      `🧾 <b>Tx ID:</b> <code>${transactionId || "N/A"}</code>\n\n` +
-      `🚀 Join @AdewaBot and start earning!`;
+    const caption = `✅ <b>ክፍያ ተፈጽሟል (Payment Confirmed)!</b>\n\n` +
+      `👤 ተጠቃሚ: @${wd.username}\n` +
+      `💰 መጠን: <b>${wd.amount} ETB</b>\n` +
+      `💳 መንገድ: ${wd.method.toUpperCase()}\n` +
+      `🧾 የትራንዛክሽን ቁጥር: <code>${txCode || "CBE-BIRR"}</code>\n\n` +
+      `🚀 በ @AdewaBot ማስታወቂያ በማየት እርስዎም ተከፋይ ይሁኑ!`;
 
     await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        chat_id: PROOF_CHANNEL_ID,
+        chat_id: PROOF_CHANNEL,
         photo: screenshotUrl,
         caption: caption,
         parse_mode: "HTML"
       })
     });
   } catch (err) {
-    console.error("Telegram post error:", err);
+    console.error("Proof Channel error:", err);
   }
 
-  res.json({ ok: true, message: "Approved and posted to proof channel!" });
+  res.json({ ok: true, message: "Approved and posted to proof channel" });
 });
 
-app.post("/api/admin/withdrawals/:id/reject", authMiddleware, adminOnly, (req, res) => {
-  const item = DB.withdrawals.find(w => w.id === req.params.id);
-  if (!item) return res.status(404).json({ ok: false, message: "Request not found." });
-
-  item.status = "rejected";
-  if (DB.users[item.telegram_id]) {
-    DB.users[item.telegram_id].balance += item.amount;
-  }
-
-  res.json({ ok: true, message: "Withdrawal rejected and refunded." });
-});
-
-// አድሚኑ ሚኒመም ዊዝድሮዋልን፣ ሪፈራል ሪዋርድን እና የሚያስፈልገውን የሰው ብዛት (1፣ 2፣ 5...) የሚቀይርበት
-app.post("/api/admin/settings", authMiddleware, adminOnly, (req, res) => {
-  const { referral_reward, min_withdraw, required_referrals } = req.body;
-  if (referral_reward !== undefined) DB.settings.referral_reward = Number(referral_reward);
-  if (min_withdraw !== undefined) DB.settings.min_withdraw = Number(min_withdraw);
-  if (required_referrals !== undefined) DB.settings.required_referrals = Number(required_referrals);
-  
-  res.json({ ok: true, message: "Settings updated successfully." });
-});
-
-app.post("/api/admin/tasks", authMiddleware, adminOnly, (req, res) => {
-  const { title, url, reward } = req.body;
-  DB.tasks.push({
-    id: "task_" + Date.now(),
-    title,
-    url,
-    reward: Number(reward || 0.5),
-    icon: "📌",
-    type: "visit"
-  });
-  res.json({ ok: true, message: "Task created." });
-});
-
-app.post("/api/admin/promo", authMiddleware, adminOnly, (req, res) => {
-  const { code, reward } = req.body;
-  DB.promos[code] = { reward: Number(reward || 1), claimedBy: [] };
-  res.json({ ok: true, message: "Promo code created." });
-});
-
+// ሰርቨሩን ማስነሻ
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Adewa Server live on port ${PORT}`);
 });
 
 module.exports = app;
