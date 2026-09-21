@@ -1,3650 +1,2996 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-  />
-
-  <title>Adewa</title>
-
-  <!-- Telegram Mini App -->
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-
-  <!-- Monetag -->
-  <script
-    src="//libtl.com/sdk.js"
-    data-zone="11849985"
-    data-sdk="show_11849985"
-  ></script>
-
-  <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    :root {
-      --bg: #f5f7fb;
-      --card: #ffffff;
-      --text: #101828;
-      --muted: #667085;
-      --border: #e4e7ec;
-      --primary: #2563eb;
-      --primary-dark: #1d4ed8;
-      --success: #12b76a;
-      --danger: #f04438;
-      --warning: #f79009;
-      --shadow: 0 8px 30px rgba(16, 24, 40, 0.07);
-      --radius: 18px;
-    }
-
-    body {
-      font-family:
-        Inter,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        Roboto,
-        Arial,
-        sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-
-    button,
-    input,
-    select {
-      font: inherit;
-    }
-
-    button {
-      border: 0;
-      cursor: pointer;
-    }
-
-    .app {
-      width: 100%;
-      max-width: 520px;
-      margin: 0 auto;
-      min-height: 100vh;
-      padding-bottom: 90px;
-    }
-
-    /* ================= HEADER ================= */
-
-    .topbar {
-      padding: 20px 18px 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .brand {
-      font-size: 24px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-    }
-
-    .profile {
-      width: 42px;
-      height: 42px;
-      border-radius: 50%;
-      overflow: hidden;
-      background: #e9eefc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      color: var(--primary);
-    }
-
-    .profile img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-
-    /* ================= PAGES ================= */
-
-    .page {
-      display: none;
-      padding: 10px 16px 20px;
-    }
-
-    .page.active {
-      display: block;
-    }
-
-    .page-title {
-      font-size: 25px;
-      font-weight: 800;
-      margin: 8px 0 18px;
-    }
-
-    /* ================= HOME ================= */
-
-    .balance-card {
-      background: linear-gradient(135deg, #2563eb, #1d4ed8);
-      color: white;
-      border-radius: 24px;
-      padding: 24px;
-      box-shadow: 0 14px 35px rgba(37, 99, 235, 0.24);
-      margin-bottom: 15px;
-    }
-
-    .balance-label {
-      font-size: 14px;
-      opacity: 0.82;
-    }
-
-    .balance-value {
-      font-size: 38px;
-      font-weight: 800;
-      margin-top: 7px;
-      letter-spacing: -1px;
-    }
-
-    .currency {
-      font-size: 17px;
-      font-weight: 600;
-      opacity: 0.85;
-    }
-
-    .balance-bottom {
-      margin-top: 18px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 13px;
-    }
-
-    .level-badge {
-      background: rgba(255, 255, 255, 0.16);
-      border: 1px solid rgba(255, 255, 255, 0.22);
-      padding: 7px 10px;
-      border-radius: 999px;
-    }
-
-    .streak-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px;
-      box-shadow: var(--shadow);
-      margin-bottom: 15px;
-    }
-
-    .streak-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .streak-title {
-      font-weight: 700;
-    }
-
-    .streak-number {
-      font-size: 25px;
-      font-weight: 800;
-      margin-top: 5px;
-    }
-
-    .streak-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 15px;
-      background: #fff4e5;
-      color: #f79009;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .home-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      margin-top: 15px;
-    }
-
-    .quick-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 17px;
-      padding: 17px;
-      box-shadow: var(--shadow);
-    }
-
-    .quick-icon {
-      width: 40px;
-      height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 12px;
-      background: #eff4ff;
-      color: var(--primary);
-      margin-bottom: 12px;
-    }
-
-    .quick-title {
-      font-weight: 700;
-      font-size: 14px;
-    }
-
-    .quick-value {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 5px;
-    }
-
-    /* ================= ADS ================= */
-
-    .ad-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 22px;
-      text-align: center;
-      box-shadow: var(--shadow);
-    }
-
-    .ad-icon {
-      width: 70px;
-      height: 70px;
-      margin: 0 auto 15px;
-      border-radius: 20px;
-      background: #eff4ff;
-      color: var(--primary);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-
-    .ad-title {
-      font-size: 21px;
-      font-weight: 800;
-    }
-
-    .ad-description {
-      color: var(--muted);
-      margin: 8px 0 20px;
-      line-height: 1.5;
-      font-size: 14px;
-    }
-
-    .progress-wrap {
-      margin: 18px 0;
-    }
-
-    .progress-header {
-      display: flex;
-      justify-content: space-between;
-      color: var(--muted);
-      font-size: 13px;
-      margin-bottom: 8px;
-    }
-
-    .progress {
-      width: 100%;
-      height: 9px;
-      border-radius: 999px;
-      background: #eaecf0;
-      overflow: hidden;
-    }
-
-    .progress-bar {
-      width: 0%;
-      height: 100%;
-      background: var(--primary);
-      border-radius: inherit;
-      transition: width 0.3s ease;
-    }
-
-    .primary-btn {
-      width: 100%;
-      background: var(--primary);
-      color: white;
-      border-radius: 14px;
-      padding: 14px 18px;
-      font-weight: 700;
-      transition: 0.2s;
-    }
-
-    .primary-btn:active {
-      transform: scale(0.98);
-    }
-
-    .primary-btn:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-
-    .secondary-btn {
-      width: 100%;
-      background: #eef4ff;
-      color: var(--primary);
-      border-radius: 14px;
-      padding: 13px 18px;
-      font-weight: 700;
-    }
-
-    /* ================= TASKS ================= */
-
-    .task-list {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    .task-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 17px;
-      padding: 16px;
-      box-shadow: var(--shadow);
-    }
-
-    .task-top {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .task-icon {
-      width: 45px;
-      height: 45px;
-      flex-shrink: 0;
-      border-radius: 13px;
-      background: #eff4ff;
-      color: var(--primary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .task-info {
-      flex: 1;
-    }
-
-    .task-name {
-      font-weight: 750;
-      font-size: 15px;
-    }
-
-    .task-reward {
-      font-size: 12px;
-      color: var(--success);
-      margin-top: 4px;
-    }
-
-    .task-button {
-      margin-top: 13px;
-      width: 100%;
-      border-radius: 12px;
-      padding: 11px;
-      background: #f2f4f7;
-      color: var(--text);
-      font-weight: 700;
-    }
-
-    .task-button.done {
-      background: #ecfdf3;
-      color: var(--success);
-    }
-
-    .required-task {
-      border: 1px solid #f79009;
-    }
-
-    /* ================= REFERRAL ================= */
-
-    .ref-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 20px;
-      box-shadow: var(--shadow);
-      margin-bottom: 15px;
-    }
-
-    .ref-code {
-      background: #f2f4f7;
-      border-radius: 13px;
-      padding: 13px;
-      font-weight: 700;
-      text-align: center;
-      margin: 14px 0;
-      word-break: break-all;
-    }
-
-    .ref-stats {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-
-    .ref-stat {
-      background: #f8fafc;
-      border-radius: 13px;
-      padding: 14px;
-    }
-
-    .ref-stat-value {
-      font-size: 21px;
-      font-weight: 800;
-    }
-
-    .ref-stat-label {
-      color: var(--muted);
-      font-size: 12px;
-      margin-top: 4px;
-    }
-
-    /* ================= REFERRAL TRACKER ================= */
-
-    .referral-item {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 15px;
-      margin-top: 10px;
-    }
-
-    .referral-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-    }
-
-    .referral-name {
-      font-weight: 700;
-    }
-
-    .qualified {
-      color: var(--success);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .pending {
-      color: var(--warning);
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .mini-progress {
-      height: 7px;
-      background: #eaecf0;
-      border-radius: 99px;
-      overflow: hidden;
-      margin-top: 10px;
-    }
-
-    .mini-progress-bar {
-      height: 100%;
-      width: 0;
-      background: var(--primary);
-    }
-
-    .referral-meta {
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    /* ================= SPIN ================= */
-
-    .spin-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      padding: 22px;
-      text-align: center;
-      box-shadow: var(--shadow);
-    }
-
-    .wheel {
-      width: 220px;
-      height: 220px;
-      border-radius: 50%;
-      margin: 15px auto 22px;
-      background:
-        conic-gradient(
-          #2563eb 0deg 45deg,
-          #ffffff 45deg 90deg,
-          #2563eb 90deg 135deg,
-          #ffffff 135deg 180deg,
-          #2563eb 180deg 225deg,
-          #ffffff 225deg 270deg,
-          #2563eb 270deg 315deg,
-          #ffffff 315deg 360deg
-        );
-      border: 8px solid white;
-      box-shadow: 0 8px 25px rgba(0, 0, 0, 0.14);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      transition: transform 3s cubic-bezier(.15,.7,.2,1);
-    }
-
-    .wheel-center {
-      width: 65px;
-      height: 65px;
-      background: white;
-      border-radius: 50%;
-      box-shadow: 0 2px 12px rgba(0,0,0,.15);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-weight: 800;
-      color: var(--primary);
-    }
-
-    .spin-pointer {
-      width: 0;
-      height: 0;
-      border-left: 9px solid transparent;
-      border-right: 9px solid transparent;
-      border-top: 18px solid var(--danger);
-      margin: -5px auto 0;
-    }
-
-    .spin-price {
-      color: var(--muted);
-      font-size: 13px;
-      margin-bottom: 14px;
-    }
-
-    /* ================= WITHDRAW ================= */
-
-    .withdraw-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 20px;
-      box-shadow: var(--shadow);
-    }
-
-    .requirement {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--border);
-      font-size: 13px;
-    }
-
-    .requirement:last-child {
-      border-bottom: 0;
-    }
-
-    .check-icon {
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      background: #ecfdf3;
-      color: var(--success);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-shrink: 0;
-    }
-
-    .requirement.not-met .check-icon {
-      background: #fef3f2;
-      color: var(--danger);
-    }
-
-    .form-group {
-      margin-top: 15px;
-    }
-
-    .form-label {
-      font-size: 13px;
-      font-weight: 700;
-      margin-bottom: 7px;
-      display: block;
-    }
-
-    .input {
-      width: 100%;
-      border: 1px solid var(--border);
-      background: white;
-      border-radius: 12px;
-      padding: 13px;
-      outline: none;
-    }
-
-    .input:focus {
-      border-color: var(--primary);
-    }
-
-    /* ================= BOTTOM NAV ================= */
-
-    .bottom-nav {
-      position: fixed;
-      z-index: 100;
-      bottom: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 100%;
-      max-width: 520px;
-      background: rgba(255,255,255,.96);
-      backdrop-filter: blur(12px);
-      border-top: 1px solid var(--border);
-      display: grid;
-      grid-template-columns: repeat(5, 1fr);
-      padding: 8px 5px calc(8px + env(safe-area-inset-bottom));
-    }
-
-    .nav-btn {
-      background: transparent;
-      color: #98a2b3;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-      font-size: 10px;
-      padding: 5px;
-    }
-
-    .nav-btn.active {
-      color: var(--primary);
-    }
-
-    .nav-icon {
-      width: 22px;
-      height: 22px;
-    }
-
-    /* ================= CHANNEL GATE ================= */
-
-    .gate {
-      position: fixed;
-      inset: 0;
-      z-index: 1000;
-      background: rgba(10, 20, 40, 0.72);
-      backdrop-filter: blur(9px);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 18px;
-    }
-
-    .gate.show {
-      display: flex;
-    }
-
-    .gate-box {
-      width: 100%;
-      max-width: 450px;
-      max-height: 90vh;
-      overflow-y: auto;
-      background: white;
-      border-radius: 24px;
-      padding: 22px;
-      box-shadow: 0 25px 80px rgba(0,0,0,.25);
-    }
-
-    .gate-header {
-      text-align: center;
-      margin-bottom: 18px;
-    }
-
-    .gate-logo {
-      width: 58px;
-      height: 58px;
-      margin: 0 auto 12px;
-      border-radius: 17px;
-      background: #eff4ff;
-      color: var(--primary);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .gate-title {
-      font-size: 22px;
-      font-weight: 800;
-    }
-
-    .gate-description {
-      margin-top: 7px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.5;
-    }
-
-    .channel-item {
-      border: 1px solid var(--border);
-      border-radius: 15px;
-      padding: 13px;
-      margin-top: 10px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .channel-number {
-      width: 30px;
-      height: 30px;
-      background: #eff4ff;
-      color: var(--primary);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      flex-shrink: 0;
-    }
-
-    .channel-info {
-      flex: 1;
-    }
-
-    .channel-name {
-      font-weight: 700;
-      font-size: 14px;
-    }
-
-    .channel-status {
-      font-size: 11px;
-      color: var(--muted);
-      margin-top: 3px;
-    }
-
-    .channel-actions {
-      display: flex;
-      gap: 6px;
-    }
-
-    .channel-btn {
-      padding: 8px 9px;
-      border-radius: 9px;
-      font-size: 11px;
-      font-weight: 700;
-      background: #eef4ff;
-      color: var(--primary);
-    }
-
-    .channel-btn.check {
-      background: #ecfdf3;
-      color: var(--success);
-    }
-
-    .gate-check {
-      margin-top: 16px;
-    }
-
-    /* ================= TOAST ================= */
-
-    .toast {
-      position: fixed;
-      z-index: 2000;
-      left: 50%;
-      bottom: 85px;
-      transform: translateX(-50%) translateY(20px);
-      background: #101828;
-      color: white;
-      border-radius: 12px;
-      padding: 12px 15px;
-      font-size: 13px;
-      opacity: 0;
-      pointer-events: none;
-      transition: .25s;
-      width: max-content;
-      max-width: calc(100% - 30px);
-      text-align: center;
-    }
-
-    .toast.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
-    }
-
-    /* ================= LOADER ================= */
-
-    .loader {
-      width: 20px;
-      height: 20px;
-      border: 2px solid rgba(255,255,255,.4);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin .7s linear infinite;
-      display: inline-block;
-      vertical-align: middle;
-    }
-
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
-      }
-    }
-
-    /* ================= EMPTY ================= */
-
-    .empty {
-      text-align: center;
-      color: var(--muted);
-      padding: 35px 10px;
-      font-size: 14px;
-    }
-
-    @media (max-width: 360px) {
-      .balance-value {
-        font-size: 32px;
-      }
-
-      .wheel {
-        width: 190px;
-        height: 190px;
-      }
-
-      .channel-actions {
-        flex-direction: column;
-      }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+    <title>Adewa</title>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+    <!-- Monetag Rewarded Interstitial -->
+    <script
+        src="//libtl.com/sdk.js"
+        data-zone="11849985"
+        data-sdk="show_11849985">
+    </script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            min-height: 100%;
+            background: #f5f7fb;
+            color: #111827;
+            font-family:
+                Inter,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Roboto,
+                Arial,
+                sans-serif;
+        }
+
+        body {
+            padding-bottom: 90px;
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        button {
+            border: 0;
+            cursor: pointer;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .app {
+            width: 100%;
+            max-width: 520px;
+            margin: auto;
+            min-height: 100vh;
+        }
+
+        /* ================================
+           LOADING
+        ================================= */
+
+        #loadingScreen {
+            position: fixed;
+            inset: 0;
+            background: #ffffff;
+            z-index: 10000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+
+        .loading-logo {
+            width: 72px;
+            height: 72px;
+            border-radius: 22px;
+            background: #111827;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 25px;
+            font-weight: 800;
+            margin-bottom: 18px;
+        }
+
+        .loader {
+            width: 28px;
+            height: 28px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #111827;
+            border-radius: 50%;
+            animation: spinLoader .8s linear infinite;
+        }
+
+        @keyframes spinLoader {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* ================================
+           HEADER
+        ================================= */
+
+        .header {
+            padding: 18px 18px 10px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+        }
+
+        .brand-icon {
+            width: 42px;
+            height: 42px;
+            background: #111827;
+            border-radius: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .brand-icon svg {
+            width: 22px;
+            height: 22px;
+        }
+
+        .brand-name {
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        .brand-subtitle {
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 2px;
+        }
+
+        .refresh-btn {
+            width: 40px;
+            height: 40px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .refresh-btn svg {
+            width: 19px;
+            height: 19px;
+        }
+
+        /* ================================
+           CONTENT
+        ================================= */
+
+        .content {
+            padding: 8px 16px 25px;
+        }
+
+        .page {
+            display: none;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        /* ================================
+           BALANCE CARD
+        ================================= */
+
+        .balance-card {
+            margin-top: 8px;
+            background: #111827;
+            color: white;
+            border-radius: 24px;
+            padding: 23px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .balance-card::after {
+            content: "";
+            position: absolute;
+            width: 170px;
+            height: 170px;
+            border-radius: 50%;
+            background: rgba(255,255,255,.04);
+            right: -70px;
+            top: -70px;
+        }
+
+        .balance-label {
+            font-size: 13px;
+            color: #cbd5e1;
+        }
+
+        .balance-value {
+            font-size: 38px;
+            line-height: 1.1;
+            font-weight: 850;
+            margin-top: 7px;
+            letter-spacing: -1px;
+        }
+
+        .balance-unit {
+            font-size: 15px;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .balance-bottom {
+            margin-top: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .level {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .level-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #f59e0b;
+        }
+
+        .streak {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            font-size: 12px;
+            color: #dbeafe;
+        }
+
+        /* ================================
+           STATS
+        ================================= */
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 11px;
+            margin-top: 13px;
+        }
+
+        .stat-card {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 18px;
+            padding: 16px;
+        }
+
+        .stat-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 11px;
+            background: #f3f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 12px;
+        }
+
+        .stat-icon svg {
+            width: 18px;
+            height: 18px;
+        }
+
+        .stat-title {
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .stat-value {
+            margin-top: 3px;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        /* ================================
+           SECTION
+        ================================= */
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin: 23px 2px 11px;
+        }
+
+        .section-title h2 {
+            font-size: 17px;
+            margin: 0;
+        }
+
+        .section-title span {
+            color: #6b7280;
+            font-size: 11px;
+        }
+
+        /* ================================
+           ACTION CARDS
+        ================================= */
+
+        .action-card {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 18px;
+            padding: 17px;
+            display: flex;
+            align-items: center;
+            gap: 13px;
+            margin-bottom: 10px;
+        }
+
+        .action-icon {
+            width: 44px;
+            height: 44px;
+            min-width: 44px;
+            border-radius: 13px;
+            background: #f3f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .action-icon svg {
+            width: 21px;
+            height: 21px;
+        }
+
+        .action-info {
+            flex: 1;
+        }
+
+        .action-title {
+            font-size: 14px;
+            font-weight: 750;
+        }
+
+        .action-desc {
+            margin-top: 4px;
+            color: #6b7280;
+            font-size: 11px;
+            line-height: 1.4;
+        }
+
+        .small-button {
+            padding: 10px 13px;
+            border-radius: 11px;
+            background: #111827;
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        /* ================================
+           PROGRESS
+        ================================= */
+
+        .progress-box {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 18px;
+            padding: 17px;
+        }
+
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+
+        .progress-header span:last-child {
+            font-weight: 750;
+        }
+
+        .progress {
+            height: 8px;
+            background: #edf0f4;
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: #111827;
+            border-radius: 20px;
+            width: 0%;
+            transition: width .3s ease;
+        }
+
+        /* ================================
+           TASK
+        ================================= */
+
+        .task-card {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 18px;
+            padding: 16px;
+            margin-bottom: 10px;
+        }
+
+        .task-top {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .task-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: #f3f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .task-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .task-main {
+            flex: 1;
+        }
+
+        .task-name {
+            font-weight: 750;
+            font-size: 14px;
+        }
+
+        .task-reward {
+            color: #059669;
+            font-size: 12px;
+            font-weight: 700;
+            margin-top: 5px;
+        }
+
+        .task-description {
+            color: #6b7280;
+            font-size: 11px;
+            margin-top: 5px;
+            line-height: 1.4;
+        }
+
+        .task-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 14px;
+        }
+
+        .task-button {
+            flex: 1;
+            padding: 11px;
+            border-radius: 11px;
+            font-size: 11px;
+            font-weight: 750;
+            background: #111827;
+            color: white;
+        }
+
+        .task-button.secondary {
+            background: #f3f4f6;
+            color: #111827;
+        }
+
+        /* ================================
+           REFERRAL
+        ================================= */
+
+        .referral-link-box {
+            background: #111827;
+            border-radius: 18px;
+            padding: 17px;
+            color: white;
+        }
+
+        .referral-link {
+            background: rgba(255,255,255,.08);
+            border-radius: 11px;
+            padding: 12px;
+            font-size: 11px;
+            word-break: break-all;
+            margin-top: 11px;
+            color: #e5e7eb;
+        }
+
+        .copy-button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 10px;
+            border-radius: 11px;
+            background: white;
+            color: #111827;
+            font-weight: 750;
+            font-size: 12px;
+        }
+
+        .referral-user {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 16px;
+            padding: 14px;
+            margin-bottom: 8px;
+        }
+
+        .referral-user-top {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .avatar {
+            width: 39px;
+            height: 39px;
+            border-radius: 12px;
+            background: #111827;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 14px;
+        }
+
+        .referral-name {
+            flex: 1;
+            font-size: 13px;
+            font-weight: 700;
+        }
+
+        .qualified {
+            color: #059669;
+            font-size: 10px;
+            font-weight: 750;
+        }
+
+        .not-qualified {
+            color: #9ca3af;
+            font-size: 10px;
+        }
+
+        .referral-progress {
+            margin-top: 11px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .day-progress {
+            background: #f8fafc;
+            padding: 9px;
+            border-radius: 10px;
+            font-size: 10px;
+            color: #6b7280;
+        }
+
+        /* ================================
+           SPIN
+        ================================= */
+
+        .spin-card {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 22px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .wheel {
+            width: 210px;
+            height: 210px;
+            margin: 15px auto 20px;
+            border-radius: 50%;
+            background:
+                conic-gradient(
+                    #111827 0deg 45deg,
+                    #f3f4f6 45deg 90deg,
+                    #111827 90deg 135deg,
+                    #f3f4f6 135deg 180deg,
+                    #111827 180deg 225deg,
+                    #f3f4f6 225deg 270deg,
+                    #111827 270deg 315deg,
+                    #f3f4f6 315deg 360deg
+                );
+            border: 8px solid white;
+            box-shadow: 0 8px 30px rgba(0,0,0,.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 2s cubic-bezier(.12,.75,.15,1);
+        }
+
+        .wheel-center {
+            width: 58px;
+            height: 58px;
+            border-radius: 50%;
+            background: white;
+            box-shadow: 0 3px 10px rgba(0,0,0,.12);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 850;
+            font-size: 12px;
+        }
+
+        .spin-result {
+            min-height: 25px;
+            font-size: 15px;
+            font-weight: 800;
+            margin-bottom: 12px;
+        }
+
+        .spin-button {
+            width: 100%;
+            background: #111827;
+            color: white;
+            padding: 14px;
+            border-radius: 13px;
+            font-weight: 800;
+        }
+
+        /* ================================
+           WITHDRAW
+        ================================= */
+
+        .form-card {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 19px;
+            padding: 17px;
+        }
+
+        .field {
+            margin-bottom: 13px;
+        }
+
+        .field label {
+            display: block;
+            font-size: 11px;
+            color: #6b7280;
+            margin-bottom: 6px;
+        }
+
+        .field input {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid #e1e5ea;
+            border-radius: 12px;
+            outline: none;
+            background: #fafafa;
+        }
+
+        .field input:focus {
+            border-color: #111827;
+            background: white;
+        }
+
+        .submit-button {
+            width: 100%;
+            padding: 14px;
+            border-radius: 13px;
+            background: #111827;
+            color: white;
+            font-weight: 800;
+        }
+
+        .submit-button:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        .withdraw-warning {
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            color: #9a3412;
+            padding: 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        /* ================================
+           CHANNEL GATE
+        ================================= */
+
+        #channelGate {
+            position: fixed;
+            inset: 0;
+            background: rgba(15,23,42,.96);
+            z-index: 9000;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            justify-content: center;
+        }
+
+        .gate-card {
+            width: 100%;
+            max-width: 480px;
+            background: white;
+            border-radius: 25px;
+            padding: 22px;
+            margin: auto 0;
+            height: fit-content;
+        }
+
+        .gate-header {
+            text-align: center;
+            margin-bottom: 18px;
+        }
+
+        .gate-icon {
+            width: 58px;
+            height: 58px;
+            border-radius: 18px;
+            background: #111827;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 13px;
+        }
+
+        .gate-icon svg {
+            width: 25px;
+            height: 25px;
+        }
+
+        .gate-header h2 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .gate-header p {
+            color: #6b7280;
+            font-size: 12px;
+            line-height: 1.5;
+            margin: 7px 0 0;
+        }
+
+        .channel-item {
+            border: 1px solid #e5e7eb;
+            border-radius: 15px;
+            padding: 13px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        .channel-number {
+            width: 31px;
+            height: 31px;
+            border-radius: 10px;
+            background: #f3f4f6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 800;
+        }
+
+        .channel-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .channel-name {
+            font-size: 12px;
+            font-weight: 750;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .channel-status {
+            font-size: 10px;
+            color: #9ca3af;
+            margin-top: 3px;
+        }
+
+        .channel-status.joined {
+            color: #059669;
+        }
+
+        .join-button {
+            background: #111827;
+            color: white;
+            padding: 9px 11px;
+            border-radius: 10px;
+            font-size: 10px;
+            font-weight: 750;
+        }
+
+        .check-all {
+            width: 100%;
+            margin-top: 8px;
+            padding: 14px;
+            border-radius: 13px;
+            background: #111827;
+            color: white;
+            font-weight: 800;
+        }
+
+        .gate-message {
+            text-align: center;
+            color: #6b7280;
+            font-size: 11px;
+            margin-top: 10px;
+            min-height: 16px;
+        }
+
+        /* ================================
+           BOTTOM NAV
+        ================================= */
+
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 520px;
+            height: 76px;
+            background: rgba(255,255,255,.96);
+            backdrop-filter: blur(15px);
+            border-top: 1px solid #e5e7eb;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            z-index: 5000;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+
+        .nav-item {
+            background: transparent;
+            color: #9ca3af;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            font-size: 9px;
+            font-weight: 700;
+        }
+
+        .nav-item svg {
+            width: 19px;
+            height: 19px;
+        }
+
+        .nav-item.active {
+            color: #111827;
+        }
+
+        /* ================================
+           TOAST
+        ================================= */
+
+        #toast {
+            position: fixed;
+            left: 50%;
+            bottom: 92px;
+            transform: translateX(-50%) translateY(15px);
+            background: #111827;
+            color: white;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 11px;
+            opacity: 0;
+            pointer-events: none;
+            transition: .25s ease;
+            z-index: 12000;
+            max-width: 90%;
+            text-align: center;
+        }
+
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* ================================
+           EMPTY
+        ================================= */
+
+        .empty {
+            background: white;
+            border: 1px solid #e8ebf0;
+            border-radius: 17px;
+            padding: 25px;
+            text-align: center;
+            color: #6b7280;
+            font-size: 12px;
+        }
+
+        /* ================================
+           MOBILE
+        ================================= */
+
+        @media (max-width: 360px) {
+            .balance-value {
+                font-size: 32px;
+            }
+
+            .wheel {
+                width: 185px;
+                height: 185px;
+            }
+        }
+    </style>
 </head>
 
 <body>
 
-  <div class="app">
+<div id="loadingScreen">
+    <div class="loading-logo">A</div>
+    <div class="loader"></div>
+</div>
+
+<div class="app">
 
     <!-- HEADER -->
-    <header class="topbar">
-      <div class="brand">Adewa</div>
+    <header class="header">
+        <div class="brand">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2">
+                    <path d="M12 2l2.7 6.2L21 9l-4.7 4.6L17.5 20 12 16.8 6.5 20l1.2-6.4L3 9l6.3-.8L12 2z"/>
+                </svg>
+            </div>
 
-      <div class="profile" id="profileBox">
-        <span id="profileLetter">A</span>
-        <img id="profileImage" style="display:none;" alt="Profile">
-      </div>
+            <div>
+                <div class="brand-name">Adewa</div>
+                <div class="brand-subtitle">Earn by completing activities</div>
+            </div>
+        </div>
+
+        <button class="refresh-btn" onclick="refreshApp()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2">
+                <path d="M20 11a8.1 8.1 0 0 0-15.5-2M4 5v4h4"/>
+                <path d="M4 13a8.1 8.1 0 0 0 15.5 2M20 19v-4h-4"/>
+            </svg>
+        </button>
     </header>
 
-    <!-- ================= HOME ================= -->
+    <main class="content">
 
-    <section id="homePage" class="page active">
+        <!-- HOME -->
+        <section id="page-home" class="page active">
 
-      <div class="balance-card">
-        <div class="balance-label">Available Balance</div>
+            <div class="balance-card">
+                <div class="balance-label">Available Balance</div>
 
-        <div class="balance-value">
-          <span id="balance">0.00</span>
-          <span class="currency">ETB</span>
-        </div>
+                <div class="balance-value">
+                    <span id="balance">0.00</span>
+                    <span class="balance-unit">ETB</span>
+                </div>
 
-        <div class="balance-bottom">
-          <span id="userName">Welcome</span>
-          <span class="level-badge" id="levelBadge">Level 1 · Bronze</span>
-        </div>
-      </div>
+                <div class="balance-bottom">
+                    <div class="level">
+                        <span class="level-dot"></span>
+                        <span id="levelText">Level 1 · Bronze</span>
+                    </div>
 
-      <div class="streak-card">
-        <div class="streak-row">
-          <div>
-            <div class="streak-title">Daily Streak</div>
-            <div class="streak-number">
-              <span id="streak">0</span> days
+                    <div class="streak">
+                        <span>Streak</span>
+                        <strong id="streak">0</strong>
+                        <span>days</span>
+                    </div>
+                </div>
             </div>
-          </div>
 
-          <div class="streak-icon">
-            <svg width="25" height="25" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="2">
-              <path d="M12 22c4 0 7-3 7-7 0-4-3-7-7-12-4 5-7 8-7 12 0 4 3 7 7 7Z"/>
-              <path d="M9.5 14.5c0 1.4 1.1 2.5 2.5 2.5s2.5-1.1 2.5-2.5"/>
-            </svg>
-          </div>
-        </div>
-      </div>
+            <div class="stats-grid">
 
-      <div class="home-grid">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <svg viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2">
+                            <path d="M12 3v18"/>
+                            <path d="M17 7H9.5a3 3 0 1 0 0 6h5a3 3 0 1 1 0 6H7"/>
+                        </svg>
+                    </div>
 
-        <div class="quick-card">
-          <div class="quick-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="2">
-              <rect x="3" y="5" width="18" height="14" rx="2"/>
-              <path d="M7 9h10M7 13h5"/>
-            </svg>
-          </div>
+                    <div class="stat-title">Today's Earnings</div>
+                    <div class="stat-value">
+                        <span id="todayEarned">0.00</span> ETB
+                    </div>
+                </div>
 
-          <div class="quick-title">Ads Today</div>
-          <div class="quick-value">
-            <span id="adsWatched">0</span> /
-            <span id="adsLimit">10</span>
-          </div>
-        </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <svg viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2">
+                            <path d="M12 20V10"/>
+                            <path d="M18 20V4"/>
+                            <path d="M6 20v-6"/>
+                        </svg>
+                    </div>
 
-        <div class="quick-card">
-          <div class="quick-icon">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="2">
-              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-            </svg>
-          </div>
+                    <div class="stat-title">Ads Today</div>
+                    <div class="stat-value">
+                        <span id="adsToday">0</span>/<span id="adsLimit">10</span>
+                    </div>
+                </div>
 
-          <div class="quick-title">Qualified Referrals</div>
-          <div class="quick-value">
-            <span id="qualifiedReferrals">0</span> / 10
-          </div>
-        </div>
+            </div>
 
-      </div>
-    </section>
+            <div class="section-title">
+                <h2>Daily Progress</h2>
+                <span id="resetTimer">Resetting...</span>
+            </div>
 
-    <!-- ================= ADS PAGE ================= -->
+            <div class="progress-box">
 
-    <section id="adsPage" class="page">
+                <div class="progress-header">
+                    <span>Watch ads</span>
+                    <span>
+                        <span id="adsProgressText">0 / 10</span>
+                    </span>
+                </div>
 
-      <h2 class="page-title">Watch Ads</h2>
+                <div class="progress">
+                    <div id="adsProgressBar" class="progress-bar"></div>
+                </div>
 
-      <div class="ad-card">
+            </div>
 
-        <div class="ad-icon">
-          <svg width="35" height="35" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="1.8">
+            <div class="section-title">
+                <h2>Quick Actions</h2>
+            </div>
+
+            <div class="action-card">
+
+                <div class="action-icon">
+                    <svg viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2">
+                        <path d="M3 12h18"/>
+                        <path d="M12 3v18"/>
+                        <circle cx="12" cy="12" r="9"/>
+                    </svg>
+                </div>
+
+                <div class="action-info">
+                    <div class="action-title">Watch Ads</div>
+                    <div class="action-desc">
+                        Watch rewarded ads and earn ETB.
+                    </div>
+                </div>
+
+                <button class="small-button" onclick="openPage('ads')">
+                    Open
+                </button>
+
+            </div>
+
+            <div class="action-card">
+
+                <div class="action-icon">
+                    <svg viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2">
+                        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                </div>
+
+                <div class="action-info">
+                    <div class="action-title">Invite Friends</div>
+                    <div class="action-desc">
+                        Build qualified referrals.
+                    </div>
+                </div>
+
+                <button class="small-button" onclick="openPage('referrals')">
+                    Invite
+                </button>
+
+            </div>
+
+        </section>
+
+        <!-- ADS -->
+        <section id="page-ads" class="page">
+
+            <div class="section-title">
+                <h2>Watch Ads</h2>
+                <span id="adRemaining">0 remaining</span>
+            </div>
+
+            <div class="progress-box">
+
+                <div class="progress-header">
+                    <span>Today's quota</span>
+                    <span id="adQuotaText">0 / 10</span>
+                </div>
+
+                <div class="progress">
+                    <div id="adQuotaBar" class="progress-bar"></div>
+                </div>
+
+            </div>
+
+            <div style="height:12px"></div>
+
+            <div class="action-card">
+
+                <div class="action-icon">
+                    <svg viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="5" width="18" height="14" rx="2"/>
+                        <path d="M10 9l5 3-5 3V9z"/>
+                    </svg>
+                </div>
+
+                <div class="action-info">
+                    <div class="action-title">Rewarded Ad</div>
+                    <div class="action-desc">
+                        Complete the advertisement to receive your reward.
+                    </div>
+                </div>
+
+            </div>
+
+            <button
+                id="watchAdButton"
+                class="submit-button"
+                style="margin-top:10px"
+                onclick="watchAd()">
+                Watch Ad
+            </button>
+
+            <div class="section-title">
+                <h2>How it works</h2>
+            </div>
+
+            <div class="empty">
+                Start the ad, complete the rewarded advertisement,
+                then Adewa verifies the session and credits your balance.
+            </div>
+
+        </section>
+
+        <!-- TASKS -->
+        <section id="page-tasks" class="page">
+
+            <div class="section-title">
+                <h2>Tasks</h2>
+                <span>Earn more</span>
+            </div>
+
+            <div id="tasksContainer">
+                <div class="empty">Loading tasks...</div>
+            </div>
+
+        </section>
+
+        <!-- REFERRALS -->
+        <section id="page-referrals" class="page">
+
+            <div class="section-title">
+                <h2>Referrals</h2>
+                <span id="refQualified">0 qualified</span>
+            </div>
+
+            <div class="referral-link-box">
+
+                <div style="font-size:13px;font-weight:800;">
+                    Invite friends
+                </div>
+
+                <div style="font-size:11px;color:#cbd5e1;margin-top:5px;">
+                    Qualified referrals help unlock withdrawals.
+                </div>
+
+                <div id="referralLink" class="referral-link">
+                    Loading...
+                </div>
+
+                <button class="copy-button" onclick="copyReferral()">
+                    Copy Referral Link
+                </button>
+
+            </div>
+
+            <div class="section-title">
+                <h2>Referral Requirements</h2>
+            </div>
+
+            <div class="progress-box">
+
+                <div class="progress-header">
+                    <span>Qualified referrals</span>
+                    <span>
+                        <span id="qualifiedCount">0</span> /
+                        <span id="requiredReferrals">10</span>
+                    </span>
+                </div>
+
+                <div class="progress">
+                    <div id="refProgressBar" class="progress-bar"></div>
+                </div>
+
+            </div>
+
+            <div class="section-title">
+                <h2>Active Referral Tracker</h2>
+            </div>
+
+            <div id="referralsContainer">
+                <div class="empty">Loading referrals...</div>
+            </div>
+
+        </section>
+
+        <!-- SPIN -->
+        <section id="page-spin" class="page">
+
+            <div class="section-title">
+                <h2>Spin & Win</h2>
+                <span id="spinCount">0 spins</span>
+            </div>
+
+            <div class="spin-card">
+
+                <div style="font-size:13px;font-weight:800;">
+                    Buy 10 spins
+                </div>
+
+                <div style="font-size:11px;color:#6b7280;margin-top:4px;">
+                    Cost: <strong>2.00 ETB</strong>
+                </div>
+
+                <div id="wheel" class="wheel">
+                    <div class="wheel-center">
+                        SPIN
+                    </div>
+                </div>
+
+                <div id="spinResult" class="spin-result"></div>
+
+                <button
+                    id="buySpinButton"
+                    class="spin-button"
+                    onclick="buySpins()">
+                    Buy 10 Spins — 2.00 ETB
+                </button>
+
+                <button
+                    id="spinButton"
+                    class="spin-button hidden"
+                    style="margin-top:8px"
+                    onclick="performSpin()">
+                    Spin
+                </button>
+
+            </div>
+
+        </section>
+
+        <!-- WITHDRAW -->
+        <section id="page-withdraw" class="page">
+
+            <div class="section-title">
+                <h2>Withdraw</h2>
+                <span id="withdrawStatus">Checking...</span>
+            </div>
+
+            <div class="withdraw-warning">
+                Withdrawals require the configured channel requirements,
+                qualified referrals, minimum balance and the 48-hour
+                withdrawal cooldown.
+            </div>
+
+            <div class="form-card">
+
+                <div class="field">
+                    <label>Amount (ETB)</label>
+                    <input
+                        id="withdrawAmount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Enter amount">
+                </div>
+
+                <div class="field">
+                    <label>Telebirr Name</label>
+                    <input
+                        id="telebirrName"
+                        type="text"
+                        placeholder="Account holder name">
+                </div>
+
+                <div class="field">
+                    <label>Telebirr Number</label>
+                    <input
+                        id="telebirrNumber"
+                        type="tel"
+                        placeholder="09XXXXXXXX">
+                </div>
+
+                <button
+                    id="withdrawButton"
+                    class="submit-button"
+                    onclick="submitWithdrawal()">
+                    Request Withdrawal
+                </button>
+
+            </div>
+
+            <div class="section-title">
+                <h2>Withdrawal Rules</h2>
+            </div>
+
+            <div class="empty">
+                <div style="text-align:left;line-height:1.8;">
+                    Minimum withdrawal:
+                    <strong id="minimumWithdraw">1.00 ETB</strong>
+                    <br>
+                    Required referrals:
+                    <strong id="withdrawRefRequired">10</strong>
+                    <br>
+                    Withdrawal interval:
+                    <strong>48 hours</strong>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+</div>
+
+<!-- BOTTOM NAV -->
+<nav class="bottom-nav">
+
+    <button class="nav-item active" data-page="home"
+            onclick="openPage('home')">
+        <svg viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
+            <path d="M3 10.5L12 3l9 7.5"/>
+            <path d="M5 9v11h14V9"/>
+        </svg>
+        <span>Home</span>
+    </button>
+
+    <button class="nav-item" data-page="ads"
+            onclick="openPage('ads')">
+        <svg viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
             <rect x="3" y="5" width="18" height="14" rx="2"/>
-            <path d="m10 9 5 3-5 3V9Z"/>
-          </svg>
-        </div>
+            <path d="M10 9l5 3-5 3V9z"/>
+        </svg>
+        <span>Ads</span>
+    </button>
 
-        <div class="ad-title">Watch & Earn</div>
+    <button class="nav-item" data-page="tasks"
+            onclick="openPage('tasks')">
+        <svg viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
+            <path d="M9 11l3 3L22 4"/>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        <span>Tasks</span>
+    </button>
 
-        <div class="ad-description">
-          Watch a rewarded ad and receive your configured reward after
-          successful completion.
-        </div>
+    <button class="nav-item" data-page="referrals"
+            onclick="openPage('referrals')">
+        <svg viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M2 21v-2a4 4 0 0 1 4-4h6"/>
+            <circle cx="17" cy="17" r="4"/>
+            <path d="M17 15v4M15 17h4"/>
+        </svg>
+        <span>Referrals</span>
+    </button>
 
-        <div class="progress-wrap">
+    <button class="nav-item" data-page="withdraw"
+            onclick="openPage('withdraw')">
+        <svg viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2">
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <path d="M16 13h.01"/>
+            <path d="M7 9h10"/>
+        </svg>
+        <span>Withdraw</span>
+    </button>
 
-          <div class="progress-header">
-            <span>Today's progress</span>
-            <span>
-              <span id="adsWatched2">0</span> /
-              <span id="adsLimit2">10</span>
-            </span>
-          </div>
+</nav>
 
-          <div class="progress">
-            <div id="adsProgress" class="progress-bar"></div>
-          </div>
+<!-- CHANNEL GATE -->
+<div id="channelGate" class="hidden">
 
-        </div>
+    <div class="gate-card">
 
-        <button id="watchAdButton" class="primary-btn">
-          Watch Ad
-        </button>
+        <div class="gate-header">
 
-        <div style="margin-top:12px;color:#667085;font-size:12px;">
-          Reward:
-          <strong id="adRewardText">0.50 ETB</strong>
-          per completed ad
-        </div>
-
-      </div>
-
-      <div class="quick-card" style="margin-top:14px;">
-        <div class="quick-title">Next Daily Reset</div>
-        <div class="quick-value" id="resetCountdown">--:--:--</div>
-      </div>
-
-    </section>
-
-    <!-- ================= TASKS ================= -->
-
-    <section id="tasksPage" class="page">
-
-      <h2 class="page-title">Tasks</h2>
-
-      <div class="task-list" id="taskList">
-
-        <!-- Persistent withdrawal channel task -->
-        <div class="task-card required-task">
-
-          <div class="task-top">
-
-            <div class="task-icon">
-              <svg width="23" height="23" viewBox="0 0 24 24"
-                fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 2 11 13"/>
-                <path d="m22 2-7 20-4-9-9-4Z"/>
-              </svg>
+            <div class="gate-icon">
+                <svg viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2">
+                    <path d="M12 2l8 4v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4z"/>
+                    <path d="M9 12l2 2 4-4"/>
+                </svg>
             </div>
 
-            <div class="task-info">
-              <div class="task-name">
-                Required Channel for Withdrawal
-              </div>
+            <h2>Join Required Channels</h2>
 
-              <div class="task-reward">
-                Required before withdrawal
-              </div>
-            </div>
-
-          </div>
-
-          <button
-            class="task-button"
-            onclick="openWithdrawalChannel()"
-          >
-            Open Channel
-          </button>
+            <p>
+                Join all required channels before using Adewa.
+                Your membership is checked by the backend.
+            </p>
 
         </div>
 
-      </div>
-
-    </section>
-
-    <!-- ================= REFERRAL ================= -->
-
-    <section id="referralPage" class="page">
-
-      <h2 class="page-title">Referral</h2>
-
-      <div class="ref-card">
-
-        <div style="font-weight:800;">
-          Invite Friends
-        </div>
-
-        <div style="color:#667085;font-size:13px;margin-top:6px;">
-          Earn referral rewards when invited users become qualified.
-        </div>
-
-        <div class="ref-code" id="referralLink">
-          Loading...
-        </div>
-
-        <button class="primary-btn" onclick="copyReferral()">
-          Copy Referral Link
-        </button>
-
-        <div style="height:10px;"></div>
-
-        <button class="secondary-btn" onclick="shareReferral()">
-          Share Referral Link
-        </button>
-
-      </div>
-
-      <div class="ref-stats">
-
-        <div class="ref-stat">
-          <div class="ref-stat-value" id="totalReferrals">
-            0
-          </div>
-          <div class="ref-stat-label">
-            Total Referrals
-          </div>
-        </div>
-
-        <div class="ref-stat">
-          <div class="ref-stat-value" id="qualifiedReferrals2">
-            0
-          </div>
-          <div class="ref-stat-label">
-            Qualified
-          </div>
-        </div>
-
-      </div>
-
-      <div style="margin-top:20px;font-size:17px;font-weight:800;">
-        Active Referral Tracker
-      </div>
-
-      <div id="referralTracker">
-        <div class="empty">
-          No referrals yet.
-        </div>
-      </div>
-
-    </section>
-
-    <!-- ================= SPIN ================= -->
-
-    <section id="spinPage" class="page">
-
-      <h2 class="page-title">Spin & Win</h2>
-
-      <div class="spin-card">
-
-        <div class="wheel" id="wheel">
-          <div class="wheel-center">
-            SPIN
-          </div>
-        </div>
-
-        <div class="spin-pointer"></div>
-
-        <div style="margin-top:18px;font-weight:800;">
-          Try your luck
-        </div>
-
-        <div class="spin-price">
-          2.00 ETB = 10 spins
-        </div>
+        <div id="channelList"></div>
 
         <button
-          id="spinButton"
-          class="primary-btn"
-          onclick="buySpins()"
-        >
-          Buy 10 Spins
+            class="check-all"
+            onclick="checkRequiredChannels(true)">
+            Check All Channels
         </button>
 
-        <div
-          style="margin-top:13px;font-size:12px;color:#667085;"
-          id="spinBalanceText"
-        >
-          Balance: 0.00 ETB
-        </div>
-
-      </div>
-
-    </section>
-
-    <!-- ================= WITHDRAW ================= -->
-
-    <section id="withdrawPage" class="page">
-
-      <h2 class="page-title">Withdraw</h2>
-
-      <div class="withdraw-card">
-
-        <div style="font-weight:800;font-size:18px;">
-          Withdrawal Requirements
-        </div>
-
-        <div class="requirement">
-          <div class="check-icon" id="channelRequirementIcon">✓</div>
-          <div>
-            Join all required Telegram channels
-          </div>
-        </div>
-
-        <div class="requirement">
-          <div class="check-icon" id="refRequirementIcon">✓</div>
-          <div>
-            <span id="withdrawRefRequirement">10</span>
-            qualified referrals
-          </div>
-        </div>
-
-        <div class="requirement">
-          <div class="check-icon" id="cooldownRequirementIcon">✓</div>
-          <div>
-            Withdrawal cooldown:
-            <span id="withdrawCooldownText">48 hours</span>
-          </div>
-        </div>
-
-        <div class="form-group">
-
-          <label class="form-label">
-            Amount (ETB)
-          </label>
-
-          <input
-            id="withdrawAmount"
-            class="input"
-            type="number"
-            min="0"
-            step="0.01"
-            placeholder="Enter amount"
-          />
-
-        </div>
-
-        <div class="form-group">
-
-          <label class="form-label">
-            Telebirr Name
-          </label>
-
-          <input
-            id="telebirrName"
-            class="input"
-            type="text"
-            placeholder="Account holder name"
-          />
-
-        </div>
-
-        <div class="form-group">
-
-          <label class="form-label">
-            Telebirr Number
-          </label>
-
-          <input
-            id="telebirrNumber"
-            class="input"
-            type="tel"
-            placeholder="09xxxxxxxx"
-          />
-
-        </div>
-
-        <div style="height:16px;"></div>
-
-        <button
-          id="withdrawButton"
-          class="primary-btn"
-          onclick="requestWithdrawal()"
-        >
-          Request Withdrawal
-        </button>
-
-        <div
-          id="withdrawStatus"
-          style="
-            margin-top:12px;
-            font-size:12px;
-            color:#667085;
-            text-align:center;
-          "
-        ></div>
-
-      </div>
-
-    </section>
-
-  </div>
-
-  <!-- ================= BOTTOM NAV ================= -->
-
-  <nav class="bottom-nav">
-
-    <button
-      class="nav-btn active"
-      data-page="homePage"
-      onclick="showPage('homePage', this)"
-    >
-      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2">
-        <path d="m3 10 9-7 9 7"/>
-        <path d="M5 10v10h14V10"/>
-      </svg>
-      <span>Home</span>
-    </button>
-
-    <button
-      class="nav-btn"
-      data-page="adsPage"
-      onclick="showPage('adsPage', this)"
-    >
-      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2">
-        <rect x="3" y="5" width="18" height="14" rx="2"/>
-        <path d="m10 9 5 3-5 3V9Z"/>
-      </svg>
-      <span>Ads</span>
-    </button>
-
-    <button
-      class="nav-btn"
-      data-page="tasksPage"
-      onclick="showPage('tasksPage', this)"
-    >
-      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2">
-        <path d="M9 11l3 3L22 4"/>
-        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-      </svg>
-      <span>Tasks</span>
-    </button>
-
-    <button
-      class="nav-btn"
-      data-page="referralPage"
-      onclick="showPage('referralPage', this)"
-    >
-      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2">
-        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
-        <circle cx="9" cy="7" r="4"/>
-        <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-      </svg>
-      <span>Referral</span>
-    </button>
-
-    <button
-      class="nav-btn"
-      data-page="withdrawPage"
-      onclick="showPage('withdrawPage', this)"
-    >
-      <svg class="nav-icon" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" stroke-width="2">
-        <rect x="3" y="5" width="18" height="14" rx="2"/>
-        <path d="M3 10h18"/>
-        <path d="M16 15h2"/>
-      </svg>
-      <span>Withdraw</span>
-    </button>
-
-  </nav>
-
-  <!-- ================= CHANNEL GATE ================= -->
-
-  <div id="channelGate" class="gate">
-
-    <div class="gate-box">
-
-      <div class="gate-header">
-
-        <div class="gate-logo">
-          <svg width="30" height="30" viewBox="0 0 24 24"
-            fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2 4 5v6c0 5.25 3.4 9.85 8 11 4.6-1.15 8-5.75 8-11V5l-8-3Z"/>
-            <path d="m9 12 2 2 4-4"/>
-          </svg>
-        </div>
-
-        <div class="gate-title">
-          Join Required Channels
-        </div>
-
-        <div class="gate-description">
-          You must join all required Telegram channels before using Adewa.
-        </div>
-
-      </div>
-
-      <div id="channelList"></div>
-
-      <button
-        id="checkAllChannelsButton"
-        class="primary-btn gate-check"
-        onclick="checkAllChannels()"
-      >
-        Check All Channels
-      </button>
-
-      <div
-        id="gateMessage"
-        style="
-          margin-top:10px;
-          text-align:center;
-          color:#667085;
-          font-size:12px;
-        "
-      ></div>
+        <div id="gateMessage" class="gate-message"></div>
 
     </div>
 
-  </div>
+</div>
 
-  <!-- TOAST -->
+<div id="toast"></div>
 
-  <div id="toast" class="toast"></div>
+<script>
+"use strict";
 
-  <script>
+/* ============================================================
+   TELEGRAM
+============================================================ */
 
-    /* =========================================================
-       ADEWA CONFIG
-       ========================================================= */
+const tg = window.Telegram && window.Telegram.WebApp
+    ? window.Telegram.WebApp
+    : null;
 
-    const CONFIG = {
+if (tg) {
+    tg.ready();
+    tg.expand();
+}
 
-      APP_NAME: "Adewa",
+/* ============================================================
+   CONFIG
+============================================================ */
 
-      ADMIN_ID: "8845432223",
+const CONFIG = {
+    API_BASE: "",
+    BOT_USERNAME: "",
+    MONETAG_ZONE: "11849985"
+};
 
-      BOT_USERNAME: "YOUR_BOT_USERNAME",
+let appConfig = {
+    channels: [],
+    adReward: 0.50,
+    referralReward: 1.00,
+    referralRequired: 10,
+    minimumWithdraw: 1.00,
+    withdrawalEnabled: true,
+    withdrawalCooldownHours: 48,
+    dailyLimits: {
+        1: 10,
+        2: 15,
+        3: 20
+    },
+    spinPrice: 2,
+    spinCount: 10
+};
 
-      API_BASE: "",
+let state = {
+    me: null,
+    configLoaded: false,
+    channelsJoined: false,
+    currentPage: "home",
+    adSessionId: null,
+    spins: 0,
+    spinning: false
+};
 
-      PROOF_CHANNEL: "@proof_chnallel",
+/* ============================================================
+   API
+============================================================ */
 
-      MONETAG_ZONE: "11849985",
+function apiUrl(path) {
+    return CONFIG.API_BASE.replace(/\/$/, "") + path;
+}
 
-      AD_REWARD: 0.50,
+async function api(path, options = {}) {
 
-      LEVELS: {
-        1: {
-          name: "Bronze",
-          adsPerDay: 10
-        },
-        2: {
-          name: "Silver",
-          adsPerDay: 15
-        },
-        3: {
-          name: "Gold",
-          adsPerDay: 20
-        }
-      },
-
-      REFERRAL_REQUIRED: 10,
-
-      WITHDRAW_COOLDOWN_HOURS: 48,
-
-      SPIN_PRICE: 2,
-
-      SPINS_PER_PURCHASE: 10,
-
-      /*
-       * Replace these with your real five channels.
-       *
-       * Example:
-       *
-       * {
-       *   id: "@mychannel",
-       *   title: "My Channel",
-       *   url: "https://t.me/mychannel"
-       * }
-       */
-
-      REQUIRED_CHANNELS: [
-        {
-          id: "CHANNEL_1",
-          title: "Required Channel 1",
-          url: "https://t.me/YOUR_CHANNEL_1"
-        },
-        {
-          id: "CHANNEL_2",
-          title: "Required Channel 2",
-          url: "https://t.me/YOUR_CHANNEL_2"
-        },
-        {
-          id: "CHANNEL_3",
-          title: "Required Channel 3",
-          url: "https://t.me/YOUR_CHANNEL_3"
-        },
-        {
-          id: "CHANNEL_4",
-          title: "Required Channel 4",
-          url: "https://t.me/YOUR_CHANNEL_4"
-        },
-        {
-          id: "CHANNEL_5",
-          title: "Required Channel 5",
-          url: "https://t.me/YOUR_CHANNEL_5"
-        }
-      ]
-
+    const headers = {
+        "Content-Type": "application/json"
     };
 
-
-    /* =========================================================
-       TELEGRAM
-       ========================================================= */
-
-    const tg = window.Telegram?.WebApp;
-
-    if (tg) {
-      tg.ready();
-      tg.expand();
-
-      try {
-        tg.setHeaderColor("#f5f7fb");
-        tg.setBackgroundColor("#f5f7fb");
-      } catch (e) {}
+    if (tg && tg.initData) {
+        headers["X-Telegram-Init-Data"] = tg.initData;
     }
 
-    const telegramUser =
-      tg?.initDataUnsafe?.user || null;
-
-
-    /* =========================================================
-       LOCAL UI STATE
-       ========================================================= */
-
-    let state = {
-
-      balance: 0,
-
-      streak: 0,
-
-      adsWatched: 0,
-
-      adsLimit: 10,
-
-      level: 1,
-
-      adReward: CONFIG.AD_REWARD,
-
-      totalReferrals: 0,
-
-      qualifiedReferrals: 0,
-
-      referralLink: "",
-
-      channelStatus: {},
-
-      spins: 0,
-
-      withdrawalEnabled: true,
-
-      lastWithdrawalAt: null,
-
-      channelVerified: false
-
-    };
-
-
-    /* =========================================================
-       HELPERS
-       ========================================================= */
-
-    function $(id) {
-      return document.getElementById(id);
-    }
-
-
-    function showToast(message) {
-
-      const toast = $("toast");
-
-      toast.textContent = message;
-
-      toast.classList.add("show");
-
-      clearTimeout(window.__toastTimer);
-
-      window.__toastTimer = setTimeout(() => {
-        toast.classList.remove("show");
-      }, 2600);
-    }
-
-
-    function money(value) {
-
-      return Number(value || 0).toFixed(2);
-
-    }
-
-
-    function escapeHtml(value) {
-
-      return String(value ?? "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-
-    }
-
-
-    /* =========================================================
-       USER PROFILE
-       ========================================================= */
-
-    function loadTelegramProfile() {
-
-      if (!telegramUser) {
-
-        $("userName").textContent = "Welcome";
-
-        return;
-
-      }
-
-      const firstName =
-        telegramUser.first_name ||
-        "User";
-
-      const lastName =
-        telegramUser.last_name ||
-        "";
-
-      $("userName").textContent =
-        `${firstName} ${lastName}`.trim();
-
-      $("profileLetter").textContent =
-        firstName.charAt(0).toUpperCase();
-
-      if (telegramUser.photo_url) {
-
-        $("profileImage").src =
-          telegramUser.photo_url;
-
-        $("profileImage").style.display =
-          "block";
-
-        $("profileLetter").style.display =
-          "none";
-      }
-    }
-
-
-    /* =========================================================
-       PAGE NAVIGATION
-       ========================================================= */
-
-    function showPage(pageId, button) {
-
-      document.querySelectorAll(".page")
-        .forEach(page => {
-          page.classList.remove("active");
-        });
-
-      const target = $(pageId);
-
-      if (target) {
-        target.classList.add("active");
-      }
-
-      document.querySelectorAll(".nav-btn")
-        .forEach(btn => {
-          btn.classList.remove("active");
-        });
-
-      if (button) {
-        button.classList.add("active");
-      }
-
-      if (pageId === "withdrawPage") {
-        updateWithdrawalRequirements();
-      }
-
-      if (pageId === "referralPage") {
-        loadReferralData();
-      }
-
-      if (pageId === "tasksPage") {
-        loadTasks();
-      }
-    }
-
-
-    /* =========================================================
-       HOME UI
-       ========================================================= */
-
-    function updateDashboard() {
-
-      $("balance").textContent =
-        money(state.balance);
-
-      $("streak").textContent =
-        state.streak;
-
-      $("adsWatched").textContent =
-        state.adsWatched;
-
-      $("adsWatched2").textContent =
-        state.adsWatched;
-
-      $("adsLimit").textContent =
-        state.adsLimit;
-
-      $("adsLimit2").textContent =
-        state.adsLimit;
-
-      $("qualifiedReferrals").textContent =
-        state.qualifiedReferrals;
-
-      $("qualifiedReferrals2").textContent =
-        state.qualifiedReferrals;
-
-      $("totalReferrals").textContent =
-        state.totalReferrals;
-
-      $("adRewardText").textContent =
-        money(state.adReward) + " ETB";
-
-      $("levelBadge").textContent =
-        `Level ${state.level} · ${CONFIG.LEVELS[state.level].name}`;
-
-      const percent =
-        state.adsLimit > 0
-          ? Math.min(
-              100,
-              (state.adsWatched / state.adsLimit) * 100
-            )
-          : 0;
-
-      $("adsProgress").style.width =
-        percent + "%";
-
-      $("spinBalanceText").textContent =
-        `Balance: ${money(state.balance)} ETB`;
-    }
-
-
-    /* =========================================================
-       ADS
-       ========================================================= */
-
-    let adLocked = false;
-
-    let adCooldownSeconds = 0;
-
-
-    async function watchAd() {
-
-      if (adLocked) {
-        showToast(
-          `Please wait ${adCooldownSeconds}s before watching another ad.`
-        );
-        return;
-      }
-
-      if (state.adsWatched >= state.adsLimit) {
-
-        showToast(
-          "You have reached today's ad limit."
-        );
-
-        return;
-      }
-
-      if (!state.channelVerified) {
-
-        showToast(
-          "Please join all required channels first."
-        );
-
-        openChannelGate();
-
-        return;
-      }
-
-      adLocked = true;
-
-      const button = $("watchAdButton");
-
-      button.disabled = true;
-
-      button.innerHTML =
-        '<span class="loader"></span> Loading Ad...';
-
-      try {
-
-        /*
-         * IMPORTANT:
-         *
-         * The client must NOT directly credit balance.
-         *
-         * The backend should create an ad session/nonce,
-         * validate the completion/reward callback,
-         * then credit the user's balance server-side.
-         */
-
-        const session =
-          await createAdSession();
-
-        if (!session.ok) {
-
-          throw new Error(
-            session.message ||
-            "Could not start ad session."
-          );
-
+    const response = await fetch(apiUrl(path), {
+        ...options,
+        headers: {
+            ...headers,
+            ...(options.headers || {})
         }
+    });
 
+    let data = {};
 
-        /*
-         * Monetag Rewarded Interstitial
-         */
-
-        if (typeof show_11849985 !== "function") {
-
-          throw new Error(
-            "Monetag SDK is not ready."
-          );
-
-        }
-
-
-        await show_11849985();
-
-
-        /*
-         * At this point, do NOT trust the browser alone
-         * to give money.
-         *
-         * The backend must validate the ad session.
-         */
-
-        const result =
-          await completeAdSession(
-            session.sessionId
-          );
-
-
-        if (!result.ok) {
-
-          throw new Error(
-            result.message ||
-            "Ad completion could not be verified."
-          );
-
-        }
-
-
-        state.balance =
-          Number(result.balance ?? state.balance);
-
-        state.adsWatched =
-          Number(result.adsWatched ?? state.adsWatched + 1);
-
-        state.adsLimit =
-          Number(result.adsLimit ?? state.adsLimit);
-
-
-        updateDashboard();
-
-        showToast(
-          `Ad completed. +${money(state.adReward)} ETB`
-        );
-
-
-        startAdCooldown(20);
-
-      } catch (error) {
-
-        console.error(error);
-
-        showToast(
-          error.message ||
-          "The ad could not be completed."
-        );
-
-      } finally {
-
-        if (adCooldownSeconds <= 0) {
-
-          adLocked = false;
-
-          button.disabled = false;
-
-          button.textContent =
-            "Watch Ad";
-        }
-
-      }
-
-    }
-
-
-    $("watchAdButton")
-      .addEventListener("click", watchAd);
-
-
-    function startAdCooldown(seconds) {
-
-      adCooldownSeconds = seconds;
-
-      adLocked = true;
-
-      const button =
-        $("watchAdButton");
-
-      const timer =
-        setInterval(() => {
-
-          adCooldownSeconds--;
-
-          if (adCooldownSeconds <= 0) {
-
-            clearInterval(timer);
-
-            adLocked = false;
-
-            button.disabled = false;
-
-            button.textContent =
-              "Watch Ad";
-
-            return;
-          }
-
-          button.textContent =
-            `Wait ${adCooldownSeconds}s`;
-
-        }, 1000);
-
-    }
-
-
-    /* =========================================================
-       BACKEND REQUEST HELPER
-       ========================================================= */
-
-    async function apiRequest(
-      endpoint,
-      options = {}
-    ) {
-
-      if (!CONFIG.API_BASE) {
-
-        return {
-          ok: false,
-          offline: true,
-          message:
-            "Backend API is not configured."
-        };
-
-      }
-
-      const headers = {
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      };
-
-
-      /*
-       * Telegram initData must be verified
-       * by your backend.
-       *
-       * Never put the Bot Token in this file.
-       */
-
-      if (tg?.initData) {
-        headers["X-Telegram-Init-Data"] =
-          tg.initData;
-      }
-
-
-      const response =
-        await fetch(
-          CONFIG.API_BASE + endpoint,
-          {
-            ...options,
-            headers
-          }
-        );
-
-
-      let data = {};
-
-      try {
+    try {
         data = await response.json();
-      } catch (e) {}
+    } catch (e) {
+        data = {
+            ok: false,
+            error: "Invalid server response"
+        };
+    }
 
-
-      if (!response.ok) {
-
+    if (!response.ok || data.ok === false) {
         throw new Error(
-          data.message ||
-          `Request failed (${response.status})`
+            data.error ||
+            data.message ||
+            `Request failed: ${response.status}`
         );
-
-      }
-
-      return data;
     }
 
+    return data;
+}
 
-    /* =========================================================
-       AD SESSION
-       ========================================================= */
+/* ============================================================
+   TOAST
+============================================================ */
 
-    async function createAdSession() {
+let toastTimer = null;
 
-      /*
-       * Expected backend:
-       *
-       * POST /api/ads/start
-       *
-       * Response:
-       * {
-       *   ok: true,
-       *   sessionId: "..."
-       * }
-       */
+function showToast(message) {
 
-      if (!CONFIG.API_BASE) {
+    const toast = document.getElementById("toast");
+
+    toast.textContent = message;
+    toast.classList.add("show");
+
+    clearTimeout(toastTimer);
+
+    toastTimer = setTimeout(() => {
+        toast.classList.remove("show");
+    }, 2800);
+}
+
+/* ============================================================
+   PAGE NAVIGATION
+============================================================ */
+
+function openPage(page) {
+
+    state.currentPage = page;
+
+    document.querySelectorAll(".page").forEach(el => {
+        el.classList.remove("active");
+    });
+
+    const selected = document.getElementById(`page-${page}`);
+
+    if (selected) {
+        selected.classList.add("active");
+    }
+
+    document.querySelectorAll(".nav-item").forEach(el => {
+        el.classList.remove("active");
+
+        if (el.dataset.page === page) {
+            el.classList.add("active");
+        }
+    });
+
+    if (page === "tasks") {
+        loadTasks();
+    }
+
+    if (page === "referrals") {
+        loadReferrals();
+    }
+
+    if (page === "withdraw") {
+        loadMe();
+    }
+}
+
+/* ============================================================
+   LOAD CONFIG
+============================================================ */
+
+async function loadConfig() {
+
+    try {
+
+        const data = await api("/api/config");
+
+        appConfig = {
+            ...appConfig,
+            ...data
+        };
+
+        if (data.dailyLimits) {
+            appConfig.dailyLimits = {
+                ...appConfig.dailyLimits,
+                ...data.dailyLimits
+            };
+        }
+
+        state.configLoaded = true;
+
+    } catch (error) {
+
+        console.error("Config error:", error);
 
         /*
-         * Development-only fallback.
-         *
-         * It DOES NOT securely pay users.
-         * Replace with your real backend.
+         * We do not invent the missing channels.
+         * The backend remains the source of truth.
          */
+    }
+}
 
-        return {
-          ok: true,
-          sessionId:
-            "dev-" +
-            Date.now() +
-            "-" +
-            Math.random()
-              .toString(36)
-              .slice(2)
-        };
-      }
+/* ============================================================
+   LOAD USER
+============================================================ */
 
+async function loadMe() {
 
-      return apiRequest(
-        "/api/ads/start",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            zone: CONFIG.MONETAG_ZONE
-          })
-        }
-      );
+    try {
 
+        const data = await api("/api/me");
+
+        state.me = data;
+
+        renderUser(data);
+
+    } catch (error) {
+
+        console.error("User error:", error);
+
+        showToast(error.message);
+    }
+}
+
+/* ============================================================
+   RENDER USER
+============================================================ */
+
+function renderUser(data) {
+
+    const user = data.user || data;
+
+    const balance = Number(
+        user.balance ??
+        data.balance ??
+        0
+    );
+
+    const streak = Number(
+        user.streak ??
+        data.streak ??
+        0
+    );
+
+    const level = Number(
+        user.level ??
+        data.level ??
+        1
+    );
+
+    const adsToday = Number(
+        data.ads_today ??
+        data.adsToday ??
+        user.ads_today ??
+        0
+    );
+
+    const adsLimit = Number(
+        data.ads_limit ??
+        data.adsLimit ??
+        getDailyLimit(level)
+    );
+
+    const todayEarned = Number(
+        data.today_earned ??
+        data.todayEarned ??
+        0
+    );
+
+    document.getElementById("balance").textContent =
+        balance.toFixed(2);
+
+    document.getElementById("streak").textContent =
+        streak;
+
+    document.getElementById("adsToday").textContent =
+        adsToday;
+
+    document.getElementById("adsLimit").textContent =
+        adsLimit;
+
+    document.getElementById("todayEarned").textContent =
+        todayEarned.toFixed(2);
+
+    document.getElementById("levelText").textContent =
+        getLevelName(level);
+
+    document.getElementById("adsProgressText").textContent =
+        `${adsToday} / ${adsLimit}`;
+
+    document.getElementById("adQuotaText").textContent =
+        `${adsToday} / ${adsLimit}`;
+
+    document.getElementById("adRemaining").textContent =
+        `${Math.max(0, adsLimit - adsToday)} remaining`;
+
+    const percentage = adsLimit > 0
+        ? Math.min(100, (adsToday / adsLimit) * 100)
+        : 0;
+
+    document.getElementById("adsProgressBar").style.width =
+        percentage + "%";
+
+    document.getElementById("adQuotaBar").style.width =
+        percentage + "%";
+
+    const required = Number(
+        data.referral_required ??
+        appConfig.referralRequired ??
+        10
+    );
+
+    const qualified = Number(
+        data.qualified_referrals ??
+        data.qualifiedReferrals ??
+        0
+    );
+
+    document.getElementById("requiredReferrals").textContent =
+        required;
+
+    document.getElementById("withdrawRefRequired").textContent =
+        required;
+
+    document.getElementById("qualifiedCount").textContent =
+        qualified;
+
+    document.getElementById("refQualified").textContent =
+        `${qualified} qualified`;
+
+    const refPercent = required > 0
+        ? Math.min(100, (qualified / required) * 100)
+        : 0;
+
+    document.getElementById("refProgressBar").style.width =
+        refPercent + "%";
+
+    document.getElementById("minimumWithdraw").textContent =
+        Number(
+            data.minimum_withdraw ??
+            appConfig.minimumWithdraw
+        ).toFixed(2) + " ETB";
+
+    const withdrawEnabled =
+        data.withdrawal_enabled ??
+        appConfig.withdrawalEnabled;
+
+    const withdrawButton =
+        document.getElementById("withdrawButton");
+
+    if (!withdrawEnabled) {
+
+        withdrawButton.disabled = true;
+        withdrawButton.textContent = "Withdrawals Locked";
+
+        document.getElementById("withdrawStatus").textContent =
+            "Locked";
+
+    } else {
+
+        withdrawButton.disabled = false;
+        withdrawButton.textContent =
+            "Request Withdrawal";
+
+        document.getElementById("withdrawStatus").textContent =
+            "Available";
     }
 
+    buildReferralLink(user);
+}
 
-    async function completeAdSession(
-      sessionId
-    ) {
+/* ============================================================
+   LEVEL
+============================================================ */
 
-      /*
-       * Expected backend:
-       *
-       * POST /api/ads/complete
-       *
-       * The backend should independently
-       * validate the ad reward/session.
-       */
+function getDailyLimit(level) {
 
-      if (!CONFIG.API_BASE) {
-
-        /*
-         * Development UI fallback only.
-         */
-
-        return {
-          ok: true,
-          balance:
-            state.balance +
-            state.adReward,
-          adsWatched:
-            state.adsWatched + 1,
-          adsLimit:
-            state.adsLimit
-        };
-      }
-
-
-      return apiRequest(
-        "/api/ads/complete",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            sessionId
-          })
-        }
-      );
-
+    if (level === 3) {
+        return Number(appConfig.dailyLimits[3] || 20);
     }
 
+    if (level === 2) {
+        return Number(appConfig.dailyLimits[2] || 15);
+    }
 
-    /* =========================================================
-       CHANNEL GATE
-       ========================================================= */
+    return Number(appConfig.dailyLimits[1] || 10);
+}
 
-    function renderChannelList() {
+function getLevelName(level) {
 
-      const container =
-        $("channelList");
+    if (Number(level) === 3) {
+        return "Level 3 · Gold";
+    }
 
-      container.innerHTML = "";
+    if (Number(level) === 2) {
+        return "Level 2 · Silver";
+    }
 
+    return "Level 1 · Bronze";
+}
 
-      CONFIG.REQUIRED_CHANNELS
-        .forEach((channel, index) => {
+/* ============================================================
+   CHANNEL GATE
+============================================================ */
 
-          const status =
-            state.channelStatus[channel.id] ||
-            "Not checked";
+async function loadChannels() {
 
+    const list = document.getElementById("channelList");
 
-          const item =
-            document.createElement("div");
+    list.innerHTML = "";
 
-          item.className =
-            "channel-item";
+    let channels = appConfig.channels || [];
 
+    /*
+     * The backend should return five channels.
+     * We only display valid configured channels.
+     */
+    channels = channels.filter(channel => {
+        return channel &&
+            (channel.username ||
+             channel.url ||
+             channel.title ||
+             channel.id);
+    });
 
-          item.innerHTML = `
+    if (!channels.length) {
 
+        list.innerHTML = `
+            <div class="empty">
+                No required channels are configured yet.
+            </div>
+        `;
+
+        return;
+    }
+
+    channels.forEach((channel, index) => {
+
+        const username =
+            channel.username ||
+            channel.title ||
+            `Channel ${index + 1}`;
+
+        const title =
+            channel.title ||
+            channel.username ||
+            `Required Channel ${index + 1}`;
+
+        const url =
+            channel.url ||
+            (
+                channel.username
+                    ? `https://t.me/${String(channel.username).replace("@","")}`
+                    : "#"
+            );
+
+        const item = document.createElement("div");
+
+        item.className = "channel-item";
+
+        item.innerHTML = `
             <div class="channel-number">
-              ${index + 1}
+                ${index + 1}
             </div>
 
             <div class="channel-info">
+                <div class="channel-name">
+                    ${escapeHtml(title)}
+                </div>
 
-              <div class="channel-name">
-                ${escapeHtml(channel.title)}
-              </div>
-
-              <div
-                class="channel-status"
-                id="channel-status-${index}"
-              >
-                ${escapeHtml(status)}
-              </div>
-
+                <div
+                    id="channel-status-${index}"
+                    class="channel-status">
+                    Not checked
+                </div>
             </div>
 
-            <div class="channel-actions">
-
-              <button
-                class="channel-btn"
-                onclick="joinChannel(${index})"
-              >
+            <button
+                class="join-button"
+                onclick="joinChannel(${index})">
                 Join
-              </button>
+            </button>
+        `;
 
-              <button
-                class="channel-btn check"
-                onclick="checkChannel(${index})"
-              >
-                Check
-              </button>
+        list.appendChild(item);
+    });
+}
 
-            </div>
-          `;
+function joinChannel(index) {
 
+    const channel = appConfig.channels[index];
 
-          container.appendChild(item);
-
-        });
-
+    if (!channel) {
+        return;
     }
 
-
-    function openChannelGate() {
-
-      renderChannelList();
-
-      $("channelGate")
-        .classList.add("show");
-
-    }
-
-
-    function closeChannelGate() {
-
-      $("channelGate")
-        .classList.remove("show");
-
-    }
-
-
-    function joinChannel(index) {
-
-      const channel =
-        CONFIG.REQUIRED_CHANNELS[index];
-
-      if (!channel) return;
-
-
-      if (tg?.openTelegramLink) {
-
-        tg.openTelegramLink(
-          channel.url
+    const url =
+        channel.url ||
+        (
+            channel.username
+                ? `https://t.me/${String(channel.username).replace("@","")}`
+                : null
         );
 
-      } else {
-
-        window.open(
-          channel.url,
-          "_blank"
-        );
-
-      }
-
+    if (!url) {
+        showToast("Channel link is not configured.");
+        return;
     }
 
-
-    async function checkChannel(index) {
-
-      const channel =
-        CONFIG.REQUIRED_CHANNELS[index];
-
-      if (!channel) return;
-
-
-      setChannelStatus(
-        index,
-        "Checking..."
-      );
-
-
-      try {
-
-        const result =
-          await checkMembershipFromBackend(
-            channel.id
-          );
-
-
-        if (result.joined) {
-
-          state.channelStatus[channel.id] =
-            "Joined";
-
-          setChannelStatus(
-            index,
-            "Joined"
-          );
-
-        } else {
-
-          state.channelStatus[channel.id] =
-            "Not joined";
-
-          setChannelStatus(
-            index,
-            "Not joined"
-          );
-
-        }
-
-      } catch (error) {
-
-        console.error(error);
-
-        setChannelStatus(
-          index,
-          "Check failed"
-        );
-
-        showToast(
-          "Membership check failed."
-        );
-
-      }
-
+    if (tg) {
+        tg.openTelegramLink(url);
+    } else {
+        window.open(url, "_blank");
     }
-
-
-    function setChannelStatus(
-      index,
-      status
-    ) {
-
-      const element =
-        $(`channel-status-${index}`);
-
-      if (element) {
-        element.textContent = status;
-      }
-
-    }
-
-
-    async function checkMembershipFromBackend(
-      channelId
-    ) {
-
-      /*
-       * Expected backend:
-       *
-       * POST /api/channels/check
-       *
-       * {
-       *   channelId: "@channel"
-       * }
-       *
-       * Backend uses Telegram Bot API
-       * getChatMember().
-       */
-
-      if (!CONFIG.API_BASE) {
-
-        /*
-         * Without a backend there is no secure
-         * way for static HTML to call Telegram
-         * getChatMember().
-         */
-
-        return {
-          joined: false
-        };
-      }
-
-
-      return apiRequest(
-        "/api/channels/check",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            channelId
-          })
-        }
-      );
-
-    }
-
-
-    async function checkAllChannels() {
-
-      const button =
-        $("checkAllChannelsButton");
-
-      button.disabled = true;
-
-      button.textContent =
-        "Checking...";
-
-
-      let allJoined = true;
-
-
-      try {
-
-        for (
-          let i = 0;
-          i < CONFIG.REQUIRED_CHANNELS.length;
-          i++
-        ) {
-
-          const channel =
-            CONFIG.REQUIRED_CHANNELS[i];
-
-          setChannelStatus(
-            i,
-            "Checking..."
-          );
-
-
-          const result =
-            await checkMembershipFromBackend(
-              channel.id
-            );
-
-
-          if (result.joined) {
-
-            state.channelStatus[channel.id] =
-              "Joined";
-
-            setChannelStatus(
-              i,
-              "Joined"
-            );
-
-          } else {
-
-            state.channelStatus[channel.id] =
-              "Not joined";
-
-            setChannelStatus(
-              i,
-              "Not joined"
-            );
-
-            allJoined = false;
-
-          }
-
-        }
-
-
-        if (allJoined) {
-
-          state.channelVerified = true;
-
-          $("gateMessage").textContent =
-            "All required channels are joined.";
-
-          closeChannelGate();
-
-          showToast(
-            "Channel verification completed."
-          );
-
-        } else {
-
-          state.channelVerified = false;
-
-          $("gateMessage").textContent =
-            "Please join all channels first.";
-
-          showToast(
-            "Some required channels are still missing."
-          );
-
-        }
-
-      } catch (error) {
-
-        console.error(error);
-
-        showToast(
-          "Could not verify channels."
-        );
-
-      } finally {
-
-        button.disabled = false;
-
-        button.textContent =
-          "Check All Channels";
-
-      }
-
-    }
-
-
-    async function verifyAllChannelsLive() {
-
-      let allJoined = true;
-
-
-      for (
-        const channel of
-        CONFIG.REQUIRED_CHANNELS
-      ) {
-
-        try {
-
-          const result =
-            await checkMembershipFromBackend(
-              channel.id
-            );
-
-
-          if (!result.joined) {
-
-            allJoined = false;
-
-            break;
-          }
-
-        } catch (error) {
-
-          console.error(error);
-
-          allJoined = false;
-
-          break;
-        }
-
-      }
-
-
-      state.channelVerified =
-        allJoined;
-
-      return allJoined;
-
-    }
-
 
     /*
-     * Re-check when user returns from Telegram.
+     * When user returns from Telegram, visibilitychange
+     * automatically triggers another membership check.
      */
+}
 
-    document.addEventListener(
-      "visibilitychange",
-      async () => {
+async function checkRequiredChannels(showMessage = false) {
 
-        if (
-          document.visibilityState ===
-          "visible"
-        ) {
+    try {
 
-          /*
-           * Don't silently bypass the gate.
-           * Re-check membership.
-           */
-
-          if (
-            CONFIG.REQUIRED_CHANNELS.length
-          ) {
-
-            const verified =
-              await verifyAllChannelsLive();
-
-            if (!verified) {
-              openChannelGate();
-            }
-
-          }
-
+        if (showMessage) {
+            document.getElementById("gateMessage").textContent =
+                "Checking membership...";
         }
 
-      }
-    );
-
-
-    /* =========================================================
-       TASKS
-       ========================================================= */
-
-    async function loadTasks() {
-
-      const list =
-        $("taskList");
-
-      /*
-       * The persistent withdrawal task
-       * remains visible.
-       *
-       * Normal tasks should be loaded
-       * from the backend.
-       */
-
-      if (!CONFIG.API_BASE) {
-        return;
-      }
-
-
-      try {
-
-        const result =
-          await apiRequest(
-            "/api/tasks",
+        const data = await api(
+            "/api/channels/check",
             {
-              method: "GET"
+                method: "POST",
+                body: JSON.stringify({})
             }
-          );
-
-
-        if (
-          !result.tasks ||
-          !Array.isArray(result.tasks)
-        ) {
-          return;
-        }
-
-
-        result.tasks.forEach(task => {
-
-          addTaskToUI(task);
-
-        });
-
-      } catch (error) {
-
-        console.error(
-          "Task loading failed:",
-          error
         );
 
-      }
+        /*
+         * Expected backend response:
+         * {
+         *   ok: true,
+         *   joined: true/false,
+         *   channels: [...]
+         * }
+         */
 
-    }
+        const joined =
+            data.joined ??
+            data.all_joined ??
+            data.allJoined ??
+            false;
 
+        renderChannelStatuses(data);
 
-    function addTaskToUI(task) {
+        state.channelsJoined = Boolean(joined);
 
-      const list =
-        $("taskList");
+        if (state.channelsJoined) {
 
+            document.getElementById("channelGate")
+                .classList.add("hidden");
 
-      const card =
-        document.createElement("div");
+            document.getElementById("gateMessage").textContent =
+                "";
 
-      card.className =
-        "task-card";
-
-
-      card.innerHTML = `
-
-        <div class="task-top">
-
-          <div class="task-icon">
-
-            <svg
-              width="23"
-              height="23"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M9 11l3 3L22 4"/>
-              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
-            </svg>
-
-          </div>
-
-          <div class="task-info">
-
-            <div class="task-name">
-              ${escapeHtml(task.title)}
-            </div>
-
-            <div class="task-reward">
-              +${money(task.reward || 0)} ETB
-            </div>
-
-          </div>
-
-        </div>
-
-        <button
-          class="task-button"
-          onclick="completeTask('${escapeHtml(task.id)}')"
-        >
-          ${task.buttonText || "Open Task"}
-        </button>
-
-      `;
-
-
-      list.appendChild(card);
-
-    }
-
-
-    async function completeTask(taskId) {
-
-      if (!CONFIG.API_BASE) {
-
-        showToast(
-          "Backend API is not connected."
-        );
-
-        return;
-      }
-
-
-      try {
-
-        const result =
-          await apiRequest(
-            "/api/tasks/complete",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                taskId
-              })
-            }
-          );
-
-
-        if (result.ok) {
-
-          if (result.balance !== undefined) {
-
-            state.balance =
-              Number(result.balance);
-
-          }
-
-          updateDashboard();
-
-          showToast(
-            "Task completed."
-          );
-
-          loadTasks();
+            showToast("All required channels verified.");
 
         } else {
 
-          showToast(
-            result.message ||
-            "Task could not be completed."
-          );
+            document.getElementById("channelGate")
+                .classList.remove("hidden");
 
+            if (showMessage) {
+                document.getElementById("gateMessage").textContent =
+                    "Please join all required channels.";
+            }
         }
 
-      } catch (error) {
-
-        showToast(
-          error.message ||
-          "Task error."
-        );
-
-      }
-
-    }
-
-
-    function openWithdrawalChannel() {
-
-      /*
-       * Replace this with the actual
-       * withdrawal-required channel URL.
-       */
-
-      const channel =
-        CONFIG.REQUIRED_CHANNELS[0];
-
-      if (!channel) return;
-
-      joinChannel(0);
-
-    }
-
-
-    /* =========================================================
-       REFERRAL
-       ========================================================= */
-
-    async function loadReferralData() {
-
-      if (!CONFIG.API_BASE) {
-
-        buildReferralLink();
-
-        renderReferralTracker([]);
-
-        return;
-      }
-
-
-      try {
-
-        const result =
-          await apiRequest(
-            "/api/referrals",
-            {
-              method: "GET"
-            }
-          );
-
-
-        state.totalReferrals =
-          Number(
-            result.totalReferrals || 0
-          );
-
-        state.qualifiedReferrals =
-          Number(
-            result.qualifiedReferrals || 0
-          );
-
-        state.referralLink =
-          result.referralLink || "";
-
-
-        updateDashboard();
-
-        renderReferralTracker(
-          result.referrals || []
-        );
-
-      } catch (error) {
+    } catch (error) {
 
         console.error(error);
 
-      }
+        document.getElementById("channelGate")
+            .classList.remove("hidden");
 
+        document.getElementById("gateMessage").textContent =
+            error.message || "Unable to verify channels.";
     }
+}
 
+function renderChannelStatuses(data) {
 
-    function buildReferralLink() {
+    const results =
+        data.channels ||
+        data.results ||
+        data.memberships ||
+        [];
 
-      if (
-        !telegramUser ||
-        !CONFIG.BOT_USERNAME ||
-        CONFIG.BOT_USERNAME ===
-        "YOUR_BOT_USERNAME"
-      ) {
+    results.forEach((result, index) => {
 
-        state.referralLink =
-          "Backend referral link required";
+        const status =
+            document.getElementById(`channel-status-${index}`);
 
-      } else {
+        if (!status) {
+            return;
+        }
 
-        state.referralLink =
-          `https://t.me/${CONFIG.BOT_USERNAME}?start=ref_${telegramUser.id}`;
+        const isJoined =
+            result.joined ??
+            result.member ??
+            result.is_member ??
+            false;
 
-      }
+        if (isJoined) {
 
+            status.textContent = "Joined";
+            status.classList.add("joined");
 
-      $("referralLink").textContent =
-        state.referralLink;
+        } else {
 
-    }
+            status.textContent = "Not joined";
+            status.classList.remove("joined");
+        }
+    });
+}
 
+/* ============================================================
+   WATCH AD
+============================================================ */
 
-    function renderReferralTracker(
-      referrals
-    ) {
+async function watchAd() {
 
-      const container =
-        $("referralTracker");
+    const button =
+        document.getElementById("watchAdButton");
 
-
-      if (
-        !Array.isArray(referrals) ||
-        referrals.length === 0
-      ) {
-
-        container.innerHTML = `
-          <div class="empty">
-            No referrals yet.
-          </div>
-        `;
-
+    if (button.disabled) {
         return;
-      }
+    }
 
+    button.disabled = true;
+    button.textContent = "Preparing...";
 
-      container.innerHTML = "";
+    try {
 
-
-      referrals.forEach(ref => {
-
-        const progress =
-          Math.min(
-            100,
-            Number(
-              ref.progressPercent || 0
-            )
-          );
-
-
-        const item =
-          document.createElement("div");
-
-        item.className =
-          "referral-item";
-
-
-        item.innerHTML = `
-
-          <div class="referral-head">
-
-            <div class="referral-name">
-              ${escapeHtml(
-                ref.name || "User"
-              )}
-            </div>
-
-            <div class="${
-              ref.qualified
-                ? "qualified"
-                : "pending"
-            }">
-
-              ${
-                ref.qualified
-                  ? "Qualified Referral"
-                  : "Pending"
-              }
-
-            </div>
-
-          </div>
-
-          <div class="mini-progress">
-
-            <div
-              class="mini-progress-bar"
-              style="width:${progress}%"
-            ></div>
-
-          </div>
-
-          <div class="referral-meta">
-
-            Day 1:
-            ${ref.day1Watched || 0}
-
-            &nbsp; | &nbsp;
-
-            Day 2:
-            ${ref.day2Watched || 0}
-
-            &nbsp; | &nbsp;
-
-            Channel:
-            ${
-              ref.channelJoined
-                ? "Joined"
-                : "Not joined"
+        /*
+         * Start server-side ad session.
+         */
+        const start = await api(
+            "/api/ads/start",
+            {
+                method: "POST",
+                body: JSON.stringify({})
             }
+        );
 
-          </div>
-        `;
+        state.adSessionId =
+            start.session_id ||
+            start.sessionId ||
+            start.id;
 
+        if (!state.adSessionId) {
+            throw new Error("Ad session was not created.");
+        }
 
-        container.appendChild(item);
+        button.textContent = "Watching...";
 
-      });
+        await showRewardedAd();
 
-    }
+        button.textContent = "Verifying...";
 
+        /*
+         * Complete endpoint is still server-controlled.
+         * The frontend does not directly add money.
+         */
+        const complete = await api(
+            "/api/ads/complete",
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    session_id: state.adSessionId
+                })
+            }
+        );
 
-    async function copyReferral() {
-
-      const link =
-        state.referralLink ||
-        $("referralLink").textContent;
-
-
-      try {
-
-        await navigator.clipboard.writeText(
-          link
+        const reward = Number(
+            complete.reward ??
+            appConfig.adReward ??
+            0.50
         );
 
         showToast(
-          "Referral link copied."
+            `Ad completed. +${reward.toFixed(2)} ETB`
         );
 
-      } catch (error) {
+        await loadMe();
+
+    } catch (error) {
+
+        console.error(error);
 
         showToast(
-          "Could not copy referral link."
+            error.message ||
+            "The advertisement could not be completed."
         );
 
-      }
+    } finally {
 
+        state.adSessionId = null;
+
+        button.disabled = false;
+        button.textContent = "Watch Ad";
+    }
+}
+
+/*
+ * Monetag's exact reward callback depends on the SDK/version.
+ * This function waits for the SDK promise when available.
+ */
+async function showRewardedAd() {
+
+    if (typeof window.show_11849985 !== "function") {
+        throw new Error(
+            "Rewarded ad SDK is not available."
+        );
     }
 
+    await window.show_11849985();
+}
 
-    function shareReferral() {
+/* ============================================================
+   TASKS
+============================================================ */
 
-      const link =
-        state.referralLink;
+async function loadTasks() {
 
+    const container =
+        document.getElementById("tasksContainer");
 
-      if (
-        tg &&
-        tg.openTelegramLink &&
-        link
-      ) {
+    container.innerHTML =
+        `<div class="empty">Loading tasks...</div>`;
 
-        const shareUrl =
-          `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Join Adewa and earn rewards.")}`;
+    try {
 
-        tg.openTelegramLink(
-          shareUrl
-        );
+        const data = await api("/api/tasks");
 
-        return;
-      }
+        const tasks =
+            data.tasks ||
+            data.items ||
+            [];
 
+        if (!tasks.length) {
 
-      if (navigator.share) {
+            container.innerHTML =
+                `<div class="empty">
+                    No active tasks right now.
+                </div>`;
 
-        navigator.share({
-          title: "Adewa",
-          text: "Join Adewa and earn rewards.",
-          url: link
+            return;
+        }
+
+        container.innerHTML = "";
+
+        tasks.forEach(task => {
+
+            const card =
+                document.createElement("div");
+
+            card.className = "task-card";
+
+            const isTelegram =
+                String(
+                    task.type ||
+                    task.task_type ||
+                    ""
+                ).toLowerCase()
+                .includes("telegram");
+
+            card.innerHTML = `
+                <div class="task-top">
+
+                    <div class="task-icon">
+                        <svg viewBox="0 0 24 24"
+                             fill="none"
+                             stroke="currentColor"
+                             stroke-width="2">
+                            <path d="M20 4L4 10l6 2 2 6 8-14z"/>
+                            <path d="M10 12l5-5"/>
+                        </svg>
+                    </div>
+
+                    <div class="task-main">
+
+                        <div class="task-name">
+                            ${escapeHtml(
+                                task.title ||
+                                task.name ||
+                                "Task"
+                            )}
+                        </div>
+
+                        <div class="task-reward">
+                            +${Number(
+                                task.reward || 0
+                            ).toFixed(2)} ETB
+                        </div>
+
+                        <div class="task-description">
+                            ${escapeHtml(
+                                task.description || ""
+                            )}
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="task-actions">
+
+                    <button
+                        class="task-button"
+                        onclick="startTask(
+                            ${Number(task.id)},
+                            ${isTelegram}
+                        )">
+                        ${isTelegram ? "Join" : "Open"}
+                    </button>
+
+                    <button
+                        class="task-button secondary"
+                        onclick="completeTask(
+                            ${Number(task.id)}
+                        )">
+                        Check
+                    </button>
+
+                </div>
+            `;
+
+            container.appendChild(card);
         });
 
+    } catch (error) {
+
+        container.innerHTML =
+            `<div class="empty">
+                ${escapeHtml(error.message)}
+            </div>`;
+    }
+}
+
+function startTask(taskId, isTelegram) {
+
+    /*
+     * The backend task list should provide a URL.
+     * We reload the task data when needed.
+     */
+    api("/api/tasks")
+        .then(data => {
+
+            const task =
+                (data.tasks || []).find(
+                    item => Number(item.id) === Number(taskId)
+                );
+
+            if (!task) {
+                showToast("Task not found.");
+                return;
+            }
+
+            const url =
+                task.url ||
+                task.link ||
+                task.channel_url;
+
+            if (!url) {
+                showToast(
+                    "This task has no link configured."
+                );
+                return;
+            }
+
+            if (tg) {
+                tg.openTelegramLink(url);
+            } else {
+                window.open(url, "_blank");
+            }
+
+        })
+        .catch(error => {
+            showToast(error.message);
+        });
+}
+
+async function completeTask(taskId) {
+
+    try {
+
+        const data = await api(
+            "/api/tasks/complete",
+            {
+                method: "POST",
+                body: JSON.stringify({
+                    task_id: taskId
+                })
+            }
+        );
+
+        showToast(
+            data.message ||
+            `Task completed. +${Number(
+                data.reward || 0
+            ).toFixed(2)} ETB`
+        );
+
+        await loadMe();
+        await loadTasks();
+
+    } catch (error) {
+
+        showToast(error.message);
+    }
+}
+
+/* ============================================================
+   REFERRALS
+============================================================ */
+
+function buildReferralLink(user) {
+
+    const username =
+        CONFIG.BOT_USERNAME ||
+        appConfig.botUsername ||
+        appConfig.bot_username ||
+        "";
+
+    const telegramId =
+        user.telegram_id ||
+        user.telegramId ||
+        user.id;
+
+    if (!username || !telegramId) {
+
+        document.getElementById("referralLink")
+            .textContent =
+            "Referral link will appear after BOT_USERNAME is configured.";
+
         return;
-      }
-
-
-      copyReferral();
-
     }
 
+    const link =
+        `https://t.me/${username}?start=ref_${telegramId}`;
 
-    /* =========================================================
-       SPIN
-       ========================================================= */
+    document.getElementById("referralLink")
+        .textContent = link;
+}
 
-    async function buySpins() {
+async function copyReferral() {
 
-      if (
-        state.balance <
-        CONFIG.SPIN_PRICE
-      ) {
+    const text =
+        document.getElementById("referralLink")
+            .textContent;
 
-        showToast(
-          "Insufficient balance."
-        );
-
+    if (!text || text.startsWith("Referral link")) {
+        showToast("Referral link is not ready.");
         return;
-      }
+    }
 
+    try {
 
-      if (!CONFIG.API_BASE) {
+        await navigator.clipboard.writeText(text);
 
-        showToast(
-          "Spin purchases require the backend."
-        );
+        showToast("Referral link copied.");
 
-        return;
-      }
+    } catch (error) {
 
+        showToast("Copy failed.");
+    }
+}
 
-      const button =
-        $("spinButton");
+async function loadReferrals() {
 
-      button.disabled = true;
+    const container =
+        document.getElementById("referralsContainer");
 
-      button.textContent =
-        "Processing...";
+    container.innerHTML =
+        `<div class="empty">Loading referrals...</div>`;
 
+    try {
 
-      try {
+        const data = await api("/api/referrals");
 
-        /*
-         * Server decides:
-         * - whether user can purchase
-         * - balance deduction
-         * - number of spins
-         * - result probabilities
-         */
+        const referrals =
+            data.referrals ||
+            data.items ||
+            [];
 
-        const result =
-          await apiRequest(
+        const qualified =
+            Number(
+                data.qualified ??
+                data.qualified_referrals ??
+                0
+            );
+
+        document.getElementById("qualifiedCount")
+            .textContent = qualified;
+
+        document.getElementById("refQualified")
+            .textContent = `${qualified} qualified`;
+
+        const required =
+            Number(
+                data.required ??
+                appConfig.referralRequired ??
+                10
+            );
+
+        document.getElementById("requiredReferrals")
+            .textContent = required;
+
+        const percentage =
+            required > 0
+                ? Math.min(100, qualified / required * 100)
+                : 0;
+
+        document.getElementById("refProgressBar")
+            .style.width = percentage + "%";
+
+        if (!referrals.length) {
+
+            container.innerHTML =
+                `<div class="empty">
+                    No referrals yet.
+                </div>`;
+
+            return;
+        }
+
+        container.innerHTML = "";
+
+        referrals.forEach(ref => {
+
+            const card =
+                document.createElement("div");
+
+            card.className = "referral-user";
+
+            const name =
+                ref.name ||
+                ref.first_name ||
+                ref.username ||
+                `User ${ref.telegram_id || ""}`;
+
+            const qualifiedStatus =
+                Boolean(
+                    ref.qualified ||
+                    ref.is_qualified
+                );
+
+            const day1 =
+                Number(
+                    ref.day1_ads ||
+                    ref.day1 ||
+                    0
+                );
+
+            const day2 =
+                Number(
+                    ref.day2_ads ||
+                    ref.day2 ||
+                    0
+                );
+
+            card.innerHTML = `
+                <div class="referral-user-top">
+
+                    <div class="avatar">
+                        ${escapeHtml(
+                            String(name)
+                                .charAt(0)
+                                .toUpperCase()
+                        )}
+                    </div>
+
+                    <div class="referral-name">
+                        ${escapeHtml(name)}
+                    </div>
+
+                    ${
+                        qualifiedStatus
+                            ? `<div class="qualified">
+                                Qualified
+                              </div>`
+                            : `<div class="not-qualified">
+                                In progress
+                              </div>`
+                    }
+
+                </div>
+
+                <div class="referral-progress">
+
+                    <div class="day-progress">
+                        Day 1:
+                        <strong>${day1}</strong>
+                    </div>
+
+                    <div class="day-progress">
+                        Day 2:
+                        <strong>${day2}</strong>
+                    </div>
+
+                </div>
+            `;
+
+            container.appendChild(card);
+        });
+
+    } catch (error) {
+
+        container.innerHTML =
+            `<div class="empty">
+                ${escapeHtml(error.message)}
+            </div>`;
+    }
+}
+
+/* ============================================================
+   SPIN
+============================================================ */
+
+async function buySpins() {
+
+    const button =
+        document.getElementById("buySpinButton");
+
+    button.disabled = true;
+
+    try {
+
+        const data = await api(
             "/api/spin/buy",
             {
-              method: "POST",
-              body: JSON.stringify({
-                quantity:
-                  CONFIG.SPINS_PER_PURCHASE
-              })
+                method: "POST",
+                body: JSON.stringify({})
             }
-          );
-
-
-        if (!result.ok) {
-
-          throw new Error(
-            result.message ||
-            "Spin purchase failed."
-          );
-
-        }
-
-
-        state.balance =
-          Number(result.balance);
+        );
 
         state.spins =
-          Number(
-            result.spins ??
-            state.spins +
-            CONFIG.SPINS_PER_PURCHASE
-          );
+            Number(
+                data.spins ??
+                data.total_spins ??
+                appConfig.spinCount
+            );
 
+        document.getElementById("spinCount")
+            .textContent =
+            `${state.spins} spins`;
 
-        updateDashboard();
-
-        spinWheel();
-
-        showToast(
-          `${CONFIG.SPINS_PER_PURCHASE} spins added.`
-        );
-
-      } catch (error) {
+        document.getElementById("spinButton")
+            .classList.remove("hidden");
 
         showToast(
-          error.message ||
-          "Spin purchase failed."
+            data.message ||
+            "10 spins purchased."
         );
 
-      } finally {
+    } catch (error) {
+
+        showToast(error.message);
+
+    } finally {
 
         button.disabled = false;
+    }
+}
 
-        button.textContent =
-          "Buy 10 Spins";
+async function performSpin() {
 
-      }
-
+    if (state.spinning) {
+        return;
     }
 
-
-    function spinWheel() {
-
-      const wheel =
-        $("wheel");
-
-      const rotation =
-        360 * 5 +
-        Math.floor(
-          Math.random() * 360
-        );
-
-      wheel.style.transform =
-        `rotate(${rotation}deg)`;
-
+    if (state.spins <= 0) {
+        showToast("You have no spins.");
+        return;
     }
 
+    state.spinning = true;
 
-    /* =========================================================
-       WITHDRAWAL
-       ========================================================= */
+    const wheel =
+        document.getElementById("wheel");
 
-    function updateWithdrawalRequirements() {
+    const result =
+        document.getElementById("spinResult");
 
-      $("withdrawRefRequirement")
-        .textContent =
-        CONFIG.REFERRAL_REQUIRED;
+    result.textContent = "Spinning...";
 
-      $("withdrawCooldownText")
-        .textContent =
-        `${CONFIG.WITHDRAW_COOLDOWN_HOURS} hours`;
+    const randomRotation =
+        1440 +
+        Math.floor(Math.random() * 720);
 
+    wheel.style.transform =
+        `rotate(${randomRotation}deg)`;
 
-      $("channelRequirementIcon")
-        .textContent =
-        state.channelVerified
-          ? "✓"
-          : "!";
+    try {
 
+        const data = await api(
+            "/api/spin/spin",
+            {
+                method: "POST",
+                body: JSON.stringify({})
+            }
+        );
 
-      $("refRequirementIcon")
-        .textContent =
-        state.qualifiedReferrals >=
-        CONFIG.REFERRAL_REQUIRED
-          ? "✓"
-          : "!";
+        setTimeout(async () => {
 
+            const reward =
+                Number(
+                    data.reward ??
+                    data.amount ??
+                    0
+                );
 
-      const cooldownOk =
-        isWithdrawalCooldownFinished();
+            result.textContent =
+                `You won ${reward.toFixed(2)} ETB`;
 
+            state.spins =
+                Number(
+                    data.spins_remaining ??
+                    Math.max(0, state.spins - 1)
+                );
 
-      $("cooldownRequirementIcon")
-        .textContent =
-        cooldownOk
-          ? "✓"
-          : "!";
+            document.getElementById("spinCount")
+                .textContent =
+                `${state.spins} spins`;
 
+            if (state.spins <= 0) {
+
+                document.getElementById("spinButton")
+                    .classList.add("hidden");
+            }
+
+            await loadMe();
+
+            state.spinning = false;
+
+        }, 2050);
+
+    } catch (error) {
+
+        wheel.style.transform = "rotate(0deg)";
+
+        result.textContent = "";
+
+        showToast(error.message);
+
+        state.spinning = false;
+    }
+}
+
+/* ============================================================
+   WITHDRAW
+============================================================ */
+
+async function submitWithdrawal() {
+
+    const button =
+        document.getElementById("withdrawButton");
+
+    if (button.disabled) {
+        return;
     }
 
-
-    function isWithdrawalCooldownFinished() {
-
-      if (!state.lastWithdrawalAt) {
-        return true;
-      }
-
-
-      const elapsed =
-        Date.now() -
-        Number(state.lastWithdrawalAt);
-
-
-      const required =
-        CONFIG.WITHDRAW_COOLDOWN_HOURS *
-        60 *
-        60 *
-        1000;
-
-
-      return elapsed >= required;
-
-    }
-
-
-    async function requestWithdrawal() {
-
-      if (!state.withdrawalEnabled) {
-
-        showToast(
-          "Withdrawals are currently locked."
-        );
-
-        return;
-      }
-
-
-      /*
-       * Fresh live membership check BEFORE
-       * every withdrawal.
-       */
-
-      const liveJoined =
-        await verifyAllChannelsLive();
-
-
-      if (!liveJoined) {
-
-        showToast(
-          "You must join all required channels."
-        );
-
-        openChannelGate();
-
-        return;
-      }
-
-
-      if (
-        state.qualifiedReferrals <
-        CONFIG.REFERRAL_REQUIRED
-      ) {
-
-        showToast(
-          `You need ${CONFIG.REFERRAL_REQUIRED} qualified referrals.`
-        );
-
-        return;
-      }
-
-
-      if (
-        !isWithdrawalCooldownFinished()
-      ) {
-
-        showToast(
-          "Withdrawal cooldown is still active."
-        );
-
-        return;
-      }
-
-
-      const amount =
+    const amount =
         Number(
-          $("withdrawAmount").value
+            document.getElementById("withdrawAmount")
+                .value
         );
 
+    const name =
+        document.getElementById("telebirrName")
+            .value
+            .trim();
 
-      const name =
-        $("telebirrName").value.trim();
+    const number =
+        document.getElementById("telebirrNumber")
+            .value
+            .trim();
 
-
-      const number =
-        $("telebirrNumber").value.trim();
-
-
-      if (
-        !amount ||
-        amount <= 0
-      ) {
-
-        showToast(
-          "Enter a valid withdrawal amount."
-        );
-
+    if (!amount || amount <= 0) {
+        showToast("Enter a valid withdrawal amount.");
         return;
-      }
+    }
 
-
-      if (
-        amount >
-        state.balance
-      ) {
-
-        showToast(
-          "Insufficient balance."
-        );
-
+    if (!name) {
+        showToast("Enter the Telebirr account name.");
         return;
-      }
+    }
 
-
-      if (!name) {
-
-        showToast(
-          "Enter the Telebirr account name."
-        );
-
+    if (!number) {
+        showToast("Enter the Telebirr number.");
         return;
-      }
+    }
 
+    button.disabled = true;
+    button.textContent = "Checking...";
 
-      if (!/^09\d{8}$/.test(number)) {
-
-        showToast(
-          "Enter a valid Telebirr number."
-        );
-
-        return;
-      }
-
-
-      if (!CONFIG.API_BASE) {
-
-        showToast(
-          "Backend API is required for withdrawal."
-        );
-
-        return;
-      }
-
-
-      const button =
-        $("withdrawButton");
-
-      button.disabled = true;
-
-      button.textContent =
-        "Submitting...";
-
-
-      try {
+    try {
 
         /*
-         * Backend should perform all of these
-         * checks again:
-         *
-         * 1. Telegram initData
-         * 2. live channel membership
-         * 3. qualified referrals
-         * 4. balance
-         * 5. cooldown
-         * 6. withdrawal lock
-         * 7. amount limits
-         * 8. duplicate request
+         * Backend performs the important checks:
+         * - live required-channel membership
+         * - balance
+         * - qualified referrals
+         * - minimum amount
+         * - 48-hour cooldown
+         * - withdrawal lock
          */
-
-        const result =
-          await apiRequest(
+        const data = await api(
             "/api/withdrawals",
             {
-              method: "POST",
-              body: JSON.stringify({
-
-                amount,
-
-                telebirrName:
-                  name,
-
-                telebirrNumber:
-                  number
-
-              })
+                method: "POST",
+                body: JSON.stringify({
+                    amount: amount,
+                    telebirr_name: name,
+                    telebirr_number: number
+                })
             }
-          );
-
-
-        if (!result.ok) {
-
-          throw new Error(
-            result.message ||
-            "Withdrawal request failed."
-          );
-
-        }
-
-
-        state.balance =
-          Number(
-            result.balance ??
-            state.balance - amount
-          );
-
-
-        state.lastWithdrawalAt =
-          Date.now();
-
-
-        updateDashboard();
-
-        updateWithdrawalRequirements();
-
-
-        $("withdrawStatus")
-          .textContent =
-          "Withdrawal request submitted for admin review.";
-
-
-        showToast(
-          "Withdrawal request submitted."
         );
 
-
-        /*
-         * Admin notification and approval are
-         * backend/bot responsibilities.
-         */
-
-      } catch (error) {
-
-        console.error(error);
-
         showToast(
-          error.message ||
-          "Withdrawal request failed."
+            data.message ||
+            "Withdrawal request submitted."
         );
 
-      } finally {
+        document.getElementById("withdrawAmount")
+            .value = "";
+
+        document.getElementById("telebirrName")
+            .value = "";
+
+        document.getElementById("telebirrNumber")
+            .value = "";
+
+        await loadMe();
+
+    } catch (error) {
+
+        showToast(error.message);
+
+    } finally {
 
         button.disabled = false;
 
-        button.textContent =
-          "Request Withdrawal";
+        if (
+            appConfig.withdrawalEnabled !== false
+        ) {
+            button.textContent =
+                "Request Withdrawal";
+        }
+    }
+}
 
-      }
+/* ============================================================
+   REFRESH
+============================================================ */
 
+async function refreshApp() {
+
+    showToast("Refreshing...");
+
+    await loadConfig();
+    await loadMe();
+
+    if (state.currentPage === "tasks") {
+        await loadTasks();
     }
 
-
-    /* =========================================================
-       DAILY RESET
-       ========================================================= */
-
-    function getNextMidnight() {
-
-      const now =
-        new Date();
-
-      const tomorrow =
-        new Date(now);
-
-      tomorrow.setHours(
-        24,
-        0,
-        0,
-        0
-      );
-
-      return tomorrow;
-
+    if (state.currentPage === "referrals") {
+        await loadReferrals();
     }
 
+    /*
+     * Always recheck channel membership when refreshing.
+     */
+    await checkRequiredChannels(false);
 
-    function updateResetCountdown() {
+    showToast("Updated.");
+}
 
-      const target =
-        getNextMidnight();
+/* ============================================================
+   DAILY RESET TIMER
+============================================================ */
 
-      const now =
-        new Date();
+function updateResetTimer() {
 
-      let diff =
-        target - now;
+    const now = new Date();
 
+    const tomorrow = new Date(now);
 
-      if (diff < 0) {
-        diff = 0;
-      }
+    tomorrow.setHours(24, 0, 0, 0);
 
-
-      const hours =
-        Math.floor(
-          diff / 3600000
+    const diff =
+        Math.max(
+            0,
+            tomorrow.getTime() - now.getTime()
         );
 
-      const minutes =
+    const hours =
+        Math.floor(diff / 3600000);
+
+    const minutes =
         Math.floor(
-          (diff % 3600000) /
-          60000
+            (diff % 3600000) / 60000
         );
 
-      const seconds =
+    const seconds =
         Math.floor(
-          (diff % 60000) /
-          1000
+            (diff % 60000) / 1000
         );
 
+    const el =
+        document.getElementById("resetTimer");
 
-      $("resetCountdown").textContent =
-        `${String(hours).padStart(2,"0")}:` +
-        `${String(minutes).padStart(2,"0")}:` +
-        `${String(seconds).padStart(2,"0")}`;
+    if (el) {
 
+        el.textContent =
+            `${String(hours).padStart(2,"0")}:` +
+            `${String(minutes).padStart(2,"0")}:` +
+            `${String(seconds).padStart(2,"0")}`;
     }
+}
 
+/* ============================================================
+   TELEGRAM RETURN / VISIBILITY
+============================================================ */
 
-    setInterval(
-      updateResetCountdown,
-      1000
-    );
+document.addEventListener(
+    "visibilitychange",
+    async () => {
 
+        if (
+            document.visibilityState === "visible"
+        ) {
 
-    /* =========================================================
-       LOAD USER DATA
-       ========================================================= */
+            /*
+             * User may have returned from Telegram
+             * after joining a channel.
+             */
+            await checkRequiredChannels(false);
+            await loadMe();
+        }
+    }
+);
 
-    async function loadUserData() {
+window.addEventListener(
+    "focus",
+    async () => {
+        await checkRequiredChannels(false);
+    }
+);
 
-      if (!CONFIG.API_BASE) {
+/* ============================================================
+   HTML ESCAPE
+============================================================ */
 
-        /*
-         * Development UI values.
-         *
-         * Real balance/rewards must come
-         * from your backend.
-         */
+function escapeHtml(value) {
 
-        state.balance = 0;
+    return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
 
-        state.streak = 0;
+/* ============================================================
+   START
+============================================================ */
 
-        state.adsWatched = 0;
+async function startApp() {
 
-        state.adsLimit =
-          CONFIG.LEVELS[1].adsPerDay;
+    try {
 
-        state.level = 1;
+        if (!tg || !tg.initData) {
 
-        updateDashboard();
+            /*
+             * Do not use fake balances or fake backend
+             * data in production.
+             */
+            document.getElementById("loadingScreen")
+                .classList.add("hidden");
 
-        return;
-      }
+            showToast(
+                "Please open Adewa from Telegram."
+            );
 
-
-      try {
-
-        const result =
-          await apiRequest(
-            "/api/me",
-            {
-              method: "GET"
-            }
-          );
-
-
-        if (!result.ok) {
-
-          throw new Error(
-            result.message ||
-            "Could not load account."
-          );
-
+            return;
         }
 
+        await loadConfig();
 
-        state.balance =
-          Number(
-            result.balance || 0
-          );
+        await loadMe();
 
-        state.streak =
-          Number(
-            result.streak || 0
-          );
+        await loadChannels();
 
-        state.adsWatched =
-          Number(
-            result.adsWatched || 0
-          );
+        /*
+         * Mandatory channel verification.
+         */
+        await checkRequiredChannels(false);
 
-        state.adsLimit =
-          Number(
-            result.adsLimit ||
-            CONFIG.LEVELS[1].adsPerDay
-          );
+        updateResetTimer();
 
-        state.level =
-          Number(
-            result.level || 1
-          );
+        setInterval(
+            updateResetTimer,
+            1000
+        );
 
-        state.adReward =
-          Number(
-            result.adReward ||
-            CONFIG.AD_REWARD
-          );
+        document.getElementById("loadingScreen")
+            .classList.add("hidden");
 
-        state.totalReferrals =
-          Number(
-            result.totalReferrals || 0
-          );
-
-        state.qualifiedReferrals =
-          Number(
-            result.qualifiedReferrals || 0
-          );
-
-        state.withdrawalEnabled =
-          result.withdrawalEnabled !== false;
-
-        state.lastWithdrawalAt =
-          result.lastWithdrawalAt || null;
-
-
-        updateDashboard();
-
-      } catch (error) {
+    } catch (error) {
 
         console.error(error);
 
+        document.getElementById("loadingScreen")
+            .classList.add("hidden");
+
         showToast(
-          "Could not load your account."
+            error.message ||
+            "Unable to load Adewa."
         );
-
-      }
-
     }
+}
 
-
-    /* =========================================================
-       INITIALIZATION
-       ========================================================= */
-
-    async function init() {
-
-      loadTelegramProfile();
-
-      renderChannelList();
-
-      buildReferralLink();
-
-      updateResetCountdown();
-
-      await loadUserData();
-
-      /*
-       * IMPORTANT:
-       * Always verify required channels when
-       * the Mini App is opened.
-       */
-
-      const verified =
-        await verifyAllChannelsLive();
-
-
-      if (!verified) {
-
-        openChannelGate();
-
-      } else {
-
-        state.channelVerified =
-          true;
-
-      }
-
-
-      updateDashboard();
-
-      loadTasks();
-
-      loadReferralData();
-
-      updateWithdrawalRequirements();
-
-    }
-
-
-    init();
-
-  </script>
+startApp();
+</script>
 
 </body>
   </html>
