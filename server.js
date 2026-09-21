@@ -590,13 +590,18 @@ app.post("/api/withdraw", authenticate, async (req, res) => {
       qualifiedCount++;
     }
   }
+let qualifiedCount = 0;
+for (const ref of refUsersRes.rows) {
+  ...
+}
 
-  if (qualifiedCount < 0) {
-    return res.status(400).json({
-      ok: false,
-      message: `You need 10 qualified referrals. Currently qualified: ${qualifiedCount}/10.`
-    });
-  }
+if (qualifiedCount < 0) {
+  return res.status(400).json({
+    ok: false,
+    message: `You need 10 qualified referrals. Currently qualified: ${qualifiedCount}/10`
+  });
+}
+
 
   // 3. Process Balance Reservation
   const client = await pool.connect();
