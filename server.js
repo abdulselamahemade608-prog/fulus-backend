@@ -573,34 +573,18 @@ app.post("/api/withdraw", authenticate, async (req, res) => {
 
   let qualifiedCount = 0;
   for (const ref of refUsersRes.rows) {
-    const d1 = await pool.query(
-      `SELECT count FROM daily_ads WHERE telegram_id = $1 AND ad_date = $2::date`,
-      [ref.telegram_id, ref.created_at]
-    );
-    const d2 = await pool.query(
-      `SELECT count FROM daily_ads WHERE telegram_id = $1 AND ad_date = ($2::date + INTERVAL '1 day')::date`,
-      [ref.telegram_id, ref.created_at]
-    );
-
-    const d1Count = d1.rowCount > 0 ? Number(d1.rows[0].count) : 0;
-    const d2Count = d2.rowCount > 0 ? Number(d2.rows[0].count) : 0;
-    const chMember = await checkChannelMembership(ref.telegram_id, REQUIRED_CHANNEL_USERNAME);
-
-    if (d1Count >= 30 && d2Count >= 30 && chMember) {
-      qualifiedCount++;
-    }
+    ...
   }
-let qualifiedCount = 0;
-for (const ref of refUsersRes.rows) {
-}
 
-if (qualifiedCount < 0) {
-  return res.status(400).json({
-    ok: false,
-    message: `You need 10 qualified referrals. Currently qualified: ${qualifiedCount}/10`
-  });
-}
+  let qualifiedCount = 0;
+  for (const ref of refUsersRes.rows) {
 
+  if (qualifiedCount < 0) {
+    return res.status(400).json({
+      ok: false,
+      message: 'You need 10 qualified referrals. Currently qualified: ${qualifiedCount}/10'
+    });
+  }
 
   // 3. Process Balance Reservation
   const client = await pool.connect();
