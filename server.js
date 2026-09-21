@@ -592,7 +592,6 @@ app.post("/api/withdraw", authenticate, async (req, res) => {
   }
 let qualifiedCount = 0;
 for (const ref of refUsersRes.rows) {
-  ...
 }
 
 if (qualifiedCount < 0) {
