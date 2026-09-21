@@ -563,28 +563,18 @@ app.post("/api/withdraw", authenticate, async (req, res) => {
   if (!isChannelJoined) {
     return res.status(400).json({ ok: false, message: "You must join and remain in our official channel!" });
   }
-
-  // 2. Verify 10 Fully Qualified Referrals (2 full days ads + channel)
-  const refUsersRes = await pool.query(
-    `SELECT u.telegram_id, u.created_at FROM referrals r
-     JOIN users u ON u.telegram_id = r.referred_id WHERE r.referrer_id = $1`,
-    [telegramId]
-  );
-
-  let qualifiedCount = 0;
-  for (const ref of refUsersRes.rows) {
-    ...
+  // 1. Verify Official Channel Active Membership
+  const isChannelJoined = await checkChannelMembership(telegramId, REQUIRED_CHANNEL_USERNAME);
+  if (!isChannelJoined) {
+    return res.status(400).json({ ok: false, message: "You must join and remain in our official channel!" });
   }
 
   let qualifiedCount = 0;
-  for (const ref of refUsersRes.rows) {
 
-  if (qualifiedCount < 0) {
-    return res.status(400).json({
-      ok: false,
-      message: 'You need 10 qualified referrals. Currently qualified: ${qualifiedCount}/10'
-    });
-  }
+  // 3. Process Balance Reservation
+  const client = await pool.connect();
+
+
 
   // 3. Process Balance Reservation
   const client = await pool.connect();
