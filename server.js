@@ -75,7 +75,6 @@ const MINI_APP_URL =
  */
 const DEFAULT_GATE_CHANNELS = [
   '@andbndj',
-  '@abdu_monye2',
   '@proof_chnallel',
   '@ABDU_CRYPTO',
   '@m_r_work1'
