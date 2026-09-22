@@ -215,6 +215,68 @@ async function settings() {
     v.gate_channels = DEFAULT_GATE_CHANNELS;
   }
 
+  /*
+   * FIX: if the admin panel has never saved these yet,
+   * the settings table simply has no row for them, so
+   * S.free_table / S.paid_table / S.spin_cost were
+   * `undefined`. That produced an empty prize list in
+   * /api/me (the wheel showed "undefined" segments) and
+   * crashed pick() with a "Cannot read properties of
+   * undefined (reading 'reduce')" 500 whenever a user
+   * actually spun. These defaults keep the spin screen
+   * working immediately, and the admin panel still
+   * overrides them the moment real values are saved.
+   */
+  if (
+    !Array.isArray(v.free_table) ||
+    !v.free_table.length
+  ) {
+    v.free_table = [
+      [0, 55],
+      [3, 25],
+      [5, 15],
+      [10, 5]
+    ];
+  }
+
+  if (
+    !Array.isArray(v.paid_table) ||
+    !v.paid_table.length
+  ) {
+    v.paid_table = [
+      [0, 40],
+      [5, 25],
+      [10, 15],
+      [20, 10],
+      [25, 1],
+      [1, 9]
+    ];
+  }
+
+  if (
+    v.spin_cost === undefined ||
+    v.spin_cost === null ||
+    v.spin_cost === ''
+  ) {
+    v.spin_cost = 20;
+  }
+
+  if (
+    v.coin_per_etb === undefined ||
+    v.coin_per_etb === null ||
+    v.coin_per_etb === ''
+  ) {
+    v.coin_per_etb = 1;
+  }
+
+  if (
+    v.free_spins === undefined ||
+    v.free_spins === null ||
+    v.free_spins === ''
+  ) {
+    v.free_spins = 5;
+  }
+
   sCache = {
     t: Date.now(),
     v
@@ -644,6 +706,15 @@ async function vipStatus(user) {
 /* ---------- utilities ---------- */
 
 function pick(table) {
+  /*
+   * FIX: defend against a missing/empty prize table so a
+   * spin never crashes with a 500 (it now just pays 0
+   * instead of throwing).
+   */
+  if (!Array.isArray(table) || !table.length) {
+    return 0;
+  }
+
   const total = table.reduce(
     (a, r) => a + Number(r[1]),
     0
@@ -2247,12 +2318,12 @@ app.post(
             inline_keyboard: [
               [
                 {
-                  text: 'Paid',
+                  text: '✅ Paid',
                   callback_data:
                     `w:a:${w.id}`
                 },
                 {
-                  text: 'Reject',
+                  text: '❌ Reject',
                   callback_data:
                     `w:r:${w.id}`
                 }
@@ -2821,14 +2892,15 @@ async function handleUpdate(u) {
         'sendMessage',
         {
           chat_id: m.chat.id,
-          text:
-            'Welcome to Adewa. Tap the button to open the app.',
+          text: r
+            ? 'Welcome to Adewa! You were invited by a friend — tap the button below to open the app.'
+            : 'Welcome to Adewa. Tap the button to open the app.',
           reply_markup: {
             inline_keyboard: [
               [
                 {
                   text:
-                    'Open Adewa',
+                    '✅ Open Adewa',
                   web_app: {
                     url:
                       MINI_APP_URL
@@ -2991,12 +3063,12 @@ async function handleUpdate(u) {
               inline_keyboard: [
                 [
                   {
-                    text: 'Approve',
+                    text: '✅ Approve',
                     callback_data:
                       `t:a:${s.id}`
                   },
                   {
-                    text: 'Reject',
+                    text: '❌ Reject',
                     callback_data:
                       `t:r:${s.id}`
                   }
@@ -3105,7 +3177,7 @@ async function handleUpdate(u) {
             }
           );
 
-          note = 'Approved';
+          note = '✅ Approved';
         } else {
           note =
             'Already handled';
@@ -3131,7 +3203,7 @@ async function handleUpdate(u) {
             }
           );
 
-          note = 'Rejected';
+          note = '❌ Rejected';
         } else {
           note =
             'Already handled';
@@ -3199,7 +3271,7 @@ async function handleUpdate(u) {
           );
 
           note =
-            'Marked as paid';
+            '✅ Marked as paid';
         } else {
           note =
             'Already handled';
@@ -3241,7 +3313,7 @@ async function handleUpdate(u) {
           );
 
           note =
-            'Rejected and refunded';
+            '❌ Rejected and refunded';
         } else {
           note =
             'Already handled';
