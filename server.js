@@ -1208,7 +1208,7 @@ app.get(
 
       invited,
 
-      lang: u.lang || 'am',
+      lang: u.lang || 'en',
 
       ref_link:
         `https://t.me/${await botName()}?start=ref_${u.id}`,
@@ -1225,12 +1225,7 @@ app.post(
   '/api/lang',
   auth,
   ah(async (req, res) => {
-    const lang =
-      String(
-        (req.body || {}).lang || ''
-      ) === 'en'
-        ? 'en'
-        : 'am';
+    const lang = 'en';
 
     await q(
       `UPDATE users
@@ -3294,7 +3289,7 @@ async function handleUpdate(u) {
       }
 
       let text =
-        'የዛሬ ትልቅ ብር የሰሩ ልጆች  በ አድስ በኢቫት በታስክ  በአጠቃላይ \n';
+        "Today's top earners — Ads · Invite · Task · Total\n";
 
       rows.forEach((r, i) => {
         const name =
@@ -3306,10 +3301,10 @@ async function handleUpdate(u) {
           Number(r.daily_task);
 
         text +=
-          `${i + 1} ${name}        ${r.daily_ads}        ${r.daily_invite}       ${r.daily_task}         ${total} ብር \n`;
+          `${i + 1} ${name}        ${r.daily_ads}        ${r.daily_invite}       ${r.daily_task}         ${total} Birr \n`;
       });
 
-      text += '\nቶሎ ስሩ ቶሎ አግኙ';
+      text += '\nWork fast, earn fast!';
 
       await tg('sendMessage', {
         chat_id: PROOF_CHANNEL,
@@ -3836,14 +3831,9 @@ app.all(
     );
 
     for (const u of rows) {
-      const am =
-        (u.lang || 'am') === 'am';
-
       await tg('sendMessage', {
         chat_id: u.id,
-        text: am
-          ? `🔥 የ${u.streak} ቀን streak ያለህ ዛሬ ካልገባህ ይጠፋል! ወደ አፑ ገብተህ Check in አድርግ.`
-          : `🔥 Your ${u.streak}-day streak will be lost if you don't check in today! Open the app now.`
+        text: `🔥 Your ${u.streak}-day streak will be lost if you don't check in today! Open the app now.`
       }).catch(() => {});
 
       await new Promise((r) =>
