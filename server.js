@@ -2670,6 +2670,7 @@ app.post(
               [
                 {
                   text: '✅ Paid',
+                  style: 'success',
                   callback_data:
                     `w:a:${w.id}`
                 },
