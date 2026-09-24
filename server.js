@@ -3750,7 +3750,7 @@ async function handleUpdate(u) {
               inline_keyboard: [
                 [
                   {
-                    text: '✅ Approve',
+                    text: '✅ Approve', 
                     style: 'success',
                     callback_data:
                       `t:a:${s.id}`
