@@ -88,6 +88,42 @@ const BOT_USERNAME =
   process.env.BOT_USERNAME || '';
 
 /*
+ * ---------- AI FAQ / admin assistant (NEW) ----------
+ * Answers ordinary user questions automatically using
+ * Claude, so a human admin doesn't have to reply to every
+ * "how do I withdraw" / "when do I get paid" message.
+ *
+ * Set these two on Vercel:
+ *   ANTHROPIC_API_KEY = your Anthropic API key
+ *   CLAUDE_MODEL      = optional, defaults to a fast/cheap model
+ */
+const ANTHROPIC_API_KEY =
+  process.env.ANTHROPIC_API_KEY || '';
+
+const CLAUDE_MODEL =
+  process.env.CLAUDE_MODEL ||
+  'claude-haiku-4-5-20251001';
+
+/*
+ * Fallback knowledge used until an admin sets custom
+ * knowledge with /setfaq <text>, or via
+ * POST /api/admin/setting {key:"faq_knowledge", value:"..."}.
+ * Edit this any time — it only affects the AI's answers,
+ * nothing else in the app.
+ */
+const DEFAULT_FAQ_KNOWLEDGE = `
+App name: Adewa (formerly FulusApp) — a Telegram Mini App where users earn coins.
+Sections: Home, Tasks, Invite, Withdraw.
+Earning sources: watching ads, completing tasks, inviting friends.
+Coins convert to Birr (ETB); the exchange rate is set by the admin (often 100 coins = 1 Birr).
+Withdraw methods: Telebirr, CBE, M-Pesa (Safaricom). Each withdrawal has a small service fee.
+Withdrawals are reviewed and paid manually by an admin; proof of payment is posted in the proof channel.
+Invited friends must join the required channels and be active on 2 separate days before the inviter is paid the referral reward.
+There are daily limits on ads/earnings, and VIP users (based on invite count) get higher or unlimited ad limits.
+If you don't know a specific number (exact fee %, exact minimum withdrawal, exact reward), say a human admin will confirm it — never guess exact figures.
+`;
+
+/*
  * The only 3 withdraw methods allowed, and the
  * validation rule for the phone/account number
  * typed for each one.
@@ -163,6 +199,55 @@ async function tg(method, body) {
       ok: false,
       description: String(e)
     };
+  }
+}
+
+/* ---------- AI FAQ helper (NEW) ---------- */
+
+async function askFAQAI(question, knowledge) {
+  if (!ANTHROPIC_API_KEY) return null;
+
+  try {
+    const r = await fetch(
+      'https://api.anthropic.com/v1/messages',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL,
+          max_tokens: 400,
+          system:
+            'You are the automatic support assistant for the Adewa Telegram earning app. ' +
+            'Reply directly and briefly (2-5 short sentences), in the SAME language the user wrote in (Amharic or English). ' +
+            'Only rely on the facts given below. If the question is unrelated to the app, or you are not sure of an exact number or rule, ' +
+            'say that a human admin will confirm it soon — never invent amounts, dates, or rules.\n\n' +
+            knowledge,
+          messages: [
+            {
+              role: 'user',
+              content: String(question).slice(0, 2000)
+            }
+          ]
+        })
+      }
+    );
+
+    const data = await r.json();
+
+    const text = (data.content || [])
+      .filter((c) => c.type === 'text')
+      .map((c) => c.text)
+      .join('\n')
+      .trim();
+
+    return text || null;
+  } catch (e) {
+    console.error('askFAQAI', e);
+    return null;
   }
 }
 
@@ -329,6 +414,14 @@ async function settings() {
     v.free_spins = 5;
   }
 
+  /*
+   * AI FAQ / admin assistant (NEW): on by default,
+   * admin can turn it off with /faqoff or the setting.
+   */
+  if (v.faq_bot_enabled === undefined) {
+    v.faq_bot_enabled = true;
+  }
+
   sCache = {
     t: Date.now(),
     v
@@ -365,7 +458,11 @@ const SETTING_KEYS = [
   'vip_invites_unlimited',
   'weekly_top_inviter_min',
   'weekly_top_inviter_bonus_etb',
-  'anticheat_ip_check'
+  'anticheat_ip_check',
+
+  /* --- AI FAQ / admin assistant (NEW) --- */
+  'faq_knowledge',
+  'faq_bot_enabled'
 ];
 
 /* ---------- users ---------- */
@@ -3344,6 +3441,115 @@ async function handleUpdate(u) {
       return;
     }
 
+    /* ---------- /setfaq (NEW, admin) ---------- */
+
+    if (
+      m.text &&
+      m.text.startsWith('/setfaq ') &&
+      isAdmin(from.id)
+    ) {
+      const text = m.text
+        .slice('/setfaq '.length)
+        .trim();
+
+      if (text) {
+        await q(
+          `INSERT INTO settings(key, value)
+           VALUES('faq_knowledge', $1)
+           ON CONFLICT(key)
+           DO UPDATE SET value=$1`,
+          [JSON.stringify(text)]
+        );
+
+        sCache.t = 0;
+
+        await tg('sendMessage', {
+          chat_id: from.id,
+          text: 'FAQ knowledge updated.'
+        });
+      }
+
+      return;
+    }
+
+    /* ---------- /faqon /faqoff (NEW, admin) ---------- */
+
+    if (
+      (m.text === '/faqon' ||
+        m.text === '/faqoff') &&
+      isAdmin(from.id)
+    ) {
+      const enabled = m.text === '/faqon';
+
+      await q(
+        `INSERT INTO settings(key, value)
+         VALUES('faq_bot_enabled', $1)
+         ON CONFLICT(key)
+         DO UPDATE SET value=$1`,
+        [JSON.stringify(enabled)]
+      );
+
+      sCache.t = 0;
+
+      await tg('sendMessage', {
+        chat_id: from.id,
+        text: enabled
+          ? 'AI FAQ auto-reply is ON.'
+          : 'AI FAQ auto-reply is OFF.'
+      });
+
+      return;
+    }
+
+    /* ---------- AI FAQ auto-reply (NEW) ----------
+     * Any plain text message that isn't a command and
+     * wasn't matched by anything above gets an instant
+     * AI-generated answer, acting like a second admin.
+     */
+
+    if (
+      m.text &&
+      !m.text.startsWith('/')
+    ) {
+      const S = await settings();
+
+      if (S.faq_bot_enabled === false) {
+        return;
+      }
+
+      await tg('sendChatAction', {
+        chat_id: m.chat.id,
+        action: 'typing'
+      });
+
+      const knowledge =
+        S.faq_knowledge || DEFAULT_FAQ_KNOWLEDGE;
+
+      const answer = await askFAQAI(
+        m.text,
+        knowledge
+      );
+
+      await tg('sendMessage', {
+        chat_id: m.chat.id,
+        text:
+          answer ||
+          'Thanks for your message — an admin will reply soon. / አመሰግናለሁ፣ አድሚን በቅርቡ ይመልስልዎታል።'
+      });
+
+      if (!answer) {
+        for (const adminId of ADMIN_IDS) {
+          await tg('sendMessage', {
+            chat_id: adminId,
+            text:
+              `❓ Unanswered question from ${from.first_name || 'user'} (ID: ${from.id}):\n${m.text}`
+          });
+        }
+      }
+
+      return;
+    }
+
     /* ---------- photo ---------- */
 
     if (m.photo) {
@@ -4008,4 +4214,4 @@ if (require.main === module) {
       );
     }
   );
-        }
+      }
