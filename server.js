@@ -2670,14 +2670,11 @@ app.post(
               [
                 {
                   text: '✅ Paid',
-                  style : 'success',
-  
                   callback_data:
                     `w:a:${w.id}`
                 },
                 {
                   text: '❌ Reject',
-                  style: 'danger',
                   callback_data:
                     `w:r:${w.id}`
                 }
@@ -3690,11 +3687,14 @@ async function handleUpdate(u) {
                 [
                   {
                     text: '✅ Approve',
+                    style: 'success'
+          
                     callback_data:
                       `t:a:${s.id}`
                   },
                   {
                     text: '❌ Reject',
+                    style : 'danger'
                     callback_data:
                       `t:r:${s.id}`
                   }
