@@ -4,8 +4,8 @@
 
 
 /* prmume emjois */
-notifictiom = ""
-START = ""
+NOTI_EMOJI = "5456140674028019486"
+
 /*
  * ---------------------------------------------------------
  * ONE-TIME DATABASE MIGRATION
@@ -2682,6 +2682,7 @@ app.post(
                 },
                 {
                   text: '❌ Reject',
+                  style: 'danger',
                   callback_data:
                     `w:r:${w.id}`
                 }
@@ -3054,7 +3055,8 @@ async function broadcastTask(taskId, title, reward, sponsor) {
       {
         chat_id: u.id,
         text:
-          `🆕 New task: ${title}\n` +
+           f"<tg-emoji emoji-id='{NOTI_EMOJI}'>📢</tg-emoji> "
+          `New task Add:${title}\n` +
           (sponsor
             ? `📣 Sponsored by: ${sponsor}\n`
             : '') +
@@ -3063,8 +3065,8 @@ async function broadcastTask(taskId, title, reward, sponsor) {
           inline_keyboard: [
             [
               {
-                text: '✅ Start',
-                style: 'danger',
+                text: ' Start',
+                style: 'success',
                 web_app: {
                   url: MINI_APP_URL
                 }
@@ -3379,7 +3381,8 @@ async function handleUpdate(u) {
               [
                 {
                   text:
-                    '✅ Open Adewa',
+                    ' Open Adewa',
+                  style:'success',
                   web_app: {
                     url:
                       MINI_APP_URL
@@ -3753,6 +3756,7 @@ async function handleUpdate(u) {
                   },
                   {
                     text: '❌ Reject',
+                    style: 'danger',
                     callback_data:
                       `t:r:${s.id}`
                   }
