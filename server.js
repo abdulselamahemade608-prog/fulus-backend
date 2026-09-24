@@ -2420,7 +2420,7 @@ app.post(
       .slice(0, 32);
 
     const holderName = String(
-      b.holder_name || ''
+      b.holder_name || b.owner_name || ''
     )
       .trim()
       .slice(0, 64);
@@ -2670,13 +2670,11 @@ app.post(
               [
                 {
                   text: '✅ Paid',
-                  style : 'success',
                   callback_data:
                     `w:a:${w.id}`
                 },
                 {
                   text: '❌ Reject',
-                  styel: 'danger' 
                   callback_data:
                     `w:r:${w.id}`
                 }
@@ -3689,14 +3687,11 @@ async function handleUpdate(u) {
                 [
                   {
                     text: '✅ Approve',
-                    style: 'success'
-          
                     callback_data:
                       `t:a:${s.id}`
                   },
                   {
                     text: '❌ Reject',
-                    style : 'danger'
                     callback_data:
                       `t:r:${s.id}`
                   }
