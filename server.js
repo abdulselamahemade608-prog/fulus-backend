@@ -3207,7 +3207,7 @@ app.post(
   adminOnly,
   ah(async (req, res) => {
     const text = String(
-      (req.body || {}).text || ''
+      (req.body || {}).text || (req.body || {}).message || ''
     )
       .trim()
       .slice(0, 2000);
@@ -3227,6 +3227,58 @@ app.post(
       .catch((e) =>
         console.error('broadcastAll', e)
       );
+
+    res.json({ ok: true });
+  })
+);
+
+/* ---------- admin: post daily leaderboard to proof channel ---------- */
+
+app.post(
+  '/api/admin/daily-leaderboard/post',
+  auth,
+  adminOnly,
+  ah(async (req, res) => {
+    const { rows } = await q(
+      `SELECT username, first_name, daily_ads, daily_invite, daily_task
+       FROM users
+       WHERE daily_earn_day=CURRENT_DATE
+         AND (daily_ads+daily_invite+daily_task) > 0
+       ORDER BY (daily_ads+daily_invite+daily_task) DESC
+       LIMIT 7`
+    );
+
+    if (!rows.length) {
+      return fail(res, 404, 'no_earnings');
+    }
+
+    let text =
+      "Today's top earners — Ads · Invite · Task · Total\n";
+
+    rows.forEach((r, i) => {
+      const name =
+        '@' + (r.username || r.first_name || 'user');
+
+      const total =
+        Number(r.daily_ads) +
+        Number(r.daily_invite) +
+        Number(r.daily_task);
+
+      text +=
+        `${i + 1} ${name}   ${r.daily_ads}   ${r.daily_invite}   ${r.daily_task}   ${total} coins\n`;
+    });
+
+    text += '\nWork fast, earn fast!';
+
+    const r = await tg('sendMessage', {
+      chat_id: PROOF_CHANNEL,
+      text
+    });
+
+    if (!r.ok) {
+      console.error('daily leaderboard', r.description);
+      return fail(res, 502, 'post_failed');
+    }
 
     res.json({ ok: true });
   })
@@ -3687,6 +3739,7 @@ async function handleUpdate(u) {
                 [
                   {
                     text: '✅ Approve',
+                    stylr: 'succeas',
                     callback_data:
                       `t:a:${s.id}`
                   },
