@@ -1977,7 +1977,7 @@ async function handleUpdate(u) {
           reply_markup: {
             inline_keyboard: [
               [
-                { text: '✅ Approve', style: success, callback_data: `t:a:${s.id}` },
+                { text: '✅ Approve', callback_data: `t:a:${s.id}` },
                 { text: '❌ Reject', callback_data: `t:r:${s.id}` }
               ]
             ]
