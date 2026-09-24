@@ -1,11 +1,5 @@
 'use strict';
 
-
-
-
-/* prmume emjois */
-NOTI_EMOJI = "5456140674028019486"
-
 /*
  * ---------------------------------------------------------
  * ONE-TIME DATABASE MIGRATION
@@ -51,6 +45,12 @@ NOTI_EMOJI = "5456140674028019486"
  * (used only inside the proof-channel message templates).
  * ---------------------------------------------------------
  */
+
+/* Premium (custom) emoji id used in task broadcasts */
+const NOTI_EMOJI = '5456140674028019486';
+
+const escHtml = (t) =>
+  String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const express = require('express');
 const cors = require('cors');
@@ -3054,18 +3054,19 @@ async function broadcastTask(taskId, title, reward, sponsor) {
       'sendMessage',
       {
         chat_id: u.id,
+        parse_mode: 'HTML',
         text:
-           f"<tg-emoji emoji-id='{NOTI_EMOJI}'>📢</tg-emoji> "
-          `New task Add:${title}\n` +
+          `<tg-emoji emoji-id="${NOTI_EMOJI}">📢</tg-emoji> ` +
+          `New task added: ${escHtml(title)}\n` +
           (sponsor
-            ? `📣 Sponsored by: ${sponsor}\n`
+            ? `📣 Sponsored by: ${escHtml(sponsor)}\n`
             : '') +
           `Reward: ${reward} coins`,
         reply_markup: {
           inline_keyboard: [
             [
               {
-                text: ' Start',
+                text: 'Start',
                 style: 'success',
                 web_app: {
                   url: MINI_APP_URL
@@ -3381,8 +3382,8 @@ async function handleUpdate(u) {
               [
                 {
                   text:
-                    ' Open Adewa',
-                  style:'success',
+                    'Open Adewa',
+                  style: 'success',
                   web_app: {
                     url:
                       MINI_APP_URL
@@ -3750,7 +3751,7 @@ async function handleUpdate(u) {
                 [
                   {
                     text: '✅ Approve',
-                    stylr: 'succeas',
+                    style: 'success',
                     callback_data:
                       `t:a:${s.id}`
                   },
