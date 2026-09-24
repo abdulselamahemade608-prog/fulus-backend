@@ -3057,6 +3057,7 @@ async function broadcastTask(taskId, title, reward, sponsor) {
             [
               {
                 text: '✅ Start',
+                style: 'danger',
                 web_app: {
                   url: MINI_APP_URL
                 }
