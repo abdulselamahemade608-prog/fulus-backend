@@ -1322,6 +1322,34 @@ app.get(
   })
 );
 
+/* ---------- checkin calendar ----------
+ * The frontend calls this every load; it was missing
+ * before (404s flooding the logs). We don't store a
+ * full per-day checkin log, so this approximates the
+ * last `streak` consecutive days ending at last_checkin.
+ */
+
+app.get(
+  '/api/checkin-calendar',
+  auth,
+  ah(async (req, res) => {
+    const u = req.user;
+    const days = [];
+
+    if (u.last_checkin_s && u.streak > 0) {
+      const base = new Date(u.last_checkin_s + 'T00:00:00Z');
+
+      for (let i = 0; i < u.streak; i++) {
+        const d = new Date(base);
+        d.setUTCDate(d.getUTCDate() - i);
+        days.push(d.toISOString().slice(0, 10));
+      }
+    }
+
+    res.json({ days });
+  })
+);
+
 /* ---------- language ---------- */
 
 app.post(
@@ -3821,6 +3849,8 @@ async function handleUpdate(u) {
       return;
     }
 
+    try {
+
     const [
       kind,
       act,
@@ -4090,6 +4120,22 @@ async function handleUpdate(u) {
           }
         }
       );
+    }
+
+    } catch (e) {
+      /*
+       * Any error in the block above used to fail
+       * silently (the webhook route always answers
+       * Telegram with 200). Now the admin sees exactly
+       * what broke instead of the button doing nothing.
+       */
+      console.error('callback_query error:', e);
+
+      await tg('answerCallbackQuery', {
+        callback_query_id: cq.id,
+        text: 'Error: ' + String(e.message || e).slice(0, 190),
+        show_alert: true
+      }).catch(() => {});
     }
   }
 }
