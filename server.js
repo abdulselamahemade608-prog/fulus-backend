@@ -3750,7 +3750,7 @@ async function handleUpdate(u) {
               inline_keyboard: [
                 [
                   {
-                    text: '✅ Approve', 
+                    text: '✅ Approve',
                     style: 'success',
                     callback_data:
                       `t:a:${s.id}`
@@ -3788,9 +3788,28 @@ async function handleUpdate(u) {
       u.callback_query;
 
     /*
+     * DEBUG: temporary logging to diagnose the
+     * "Approve button does nothing" report.
+     * Check these lines in Vercel > your project >
+     * Logs right after tapping the button.
+     * Remove this block once the cause is confirmed.
+     */
+    console.log(
+      'callback_query received:',
+      'from=' + cq.from.id,
+      'data=' + cq.data,
+      'isAdmin=' + isAdmin(cq.from.id)
+    );
+
+    /*
      * Multiple admin support.
      */
     if (!isAdmin(cq.from.id)) {
+      console.log(
+        'callback rejected: sender is not in ADMIN_IDS',
+        cq.from.id
+      );
+
       await tg(
         'answerCallbackQuery',
         {
@@ -3825,6 +3844,11 @@ async function handleUpdate(u) {
              task_id,
              user_id`,
           [id]
+        );
+
+        console.log(
+          'task approve: id=' + id,
+          'rowCount=' + r.rowCount
         );
 
         if (r.rowCount) {
@@ -4280,4 +4304,4 @@ if (require.main === module) {
       );
     }
   );
-      }
+  }
