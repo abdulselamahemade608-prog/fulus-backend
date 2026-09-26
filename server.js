@@ -34,6 +34,26 @@
  *   CREATE INDEX IF NOT EXISTS task_broadcasts_task_idx
  *     ON task_broadcasts(task_id);
  *
+ *   -- Per-channel referral payouts (NEW):
+ *   ALTER TABLE users
+ *     ADD COLUMN IF NOT EXISTS full_referral_bonus_paid boolean NOT NULL DEFAULT false;
+ *
+ *   CREATE TABLE IF NOT EXISTS referral_channels(
+ *     invitee_id bigint NOT NULL,
+ *     channel text NOT NULL,
+ *     referrer_id bigint NOT NULL,
+ *     was_member_before boolean NOT NULL DEFAULT false,
+ *     currently_joined boolean NOT NULL DEFAULT false,
+ *     joined_at timestamptz,
+ *     paid boolean NOT NULL DEFAULT false,
+ *     paid_at timestamptz,
+ *     left_after_paid boolean NOT NULL DEFAULT false,
+ *     clawed_back boolean NOT NULL DEFAULT false,
+ *     PRIMARY KEY (invitee_id, channel)
+ *   );
+ *   CREATE INDEX IF NOT EXISTS referral_channels_referrer_idx
+ *     ON referral_channels(referrer_id);
+ *
  * Also set this new environment variable on Vercel:
  *   CRON_SECRET = <any random string you pick>
  * It protects the two cron endpoints added below
@@ -428,6 +448,62 @@ async function settings() {
     v.faq_bot_enabled = true;
   }
 
+  /*
+   * Per-channel referral payouts (NEW): how much each
+   * gate channel pays a referrer when their invitee
+   * newly joins it. Any channel not listed here falls
+   * back to `referral_reward`. Example admin setting:
+   * {"@andbndj": 20, "@proof_chnallel": 10}
+   */
+  if (
+    !v.channel_rewards ||
+    typeof v.channel_rewards !== 'object' ||
+    Array.isArray(v.channel_rewards)
+  ) {
+    v.channel_rewards = {};
+  }
+
+  if (
+    v.referral_min_hold_hours === undefined ||
+    v.referral_min_hold_hours === null ||
+    v.referral_min_hold_hours === ''
+  ) {
+    /* invitee must stay in the channel this long before it pays out */
+    v.referral_min_hold_hours = 24;
+  }
+
+  if (
+    v.referral_clawback_hours === undefined ||
+    v.referral_clawback_hours === null ||
+    v.referral_clawback_hours === ''
+  ) {
+    /* if the invitee leaves within this many hours AFTER payout, take the coins back */
+    v.referral_clawback_hours = 48;
+  }
+
+  if (
+    v.referral_daily_cap === undefined ||
+    v.referral_daily_cap === null ||
+    v.referral_daily_cap === ''
+  ) {
+    /* 0 = no cap; otherwise max paid channel-joins per referrer per day */
+    v.referral_daily_cap = 0;
+  }
+
+  if (v.referral_require_activity === undefined) {
+    /* invitee must complete at least one ad or check-in before payout */
+    v.referral_require_activity = true;
+  }
+
+  if (
+    v.referral_full_bonus === undefined ||
+    v.referral_full_bonus === null ||
+    v.referral_full_bonus === ''
+  ) {
+    /* extra bonus once an invitee has been paid for every required channel */
+    v.referral_full_bonus = 0;
+  }
+
   sCache = {
     t: Date.now(),
     v
@@ -468,7 +544,16 @@ const SETTING_KEYS = [
 
   /* --- AI FAQ / admin assistant (NEW) --- */
   'faq_knowledge',
-  'faq_bot_enabled'
+  'faq_bot_enabled',
+
+  /* --- per-channel referral payouts (NEW) --- */
+  'channel_rewards',
+  'referral_min_hold_hours',
+  'referral_clawback_hours',
+  'referral_daily_cap',
+  'referral_require_activity',
+  'referral_full_bonus',
+  'support_bot_username'
 ];
 
 /* ---------- users ---------- */
@@ -492,15 +577,29 @@ async function ensureUser(tu, refId) {
       /^\d+$/.test(String(refId)) &&
       String(refId) !== String(tu.id)
     ) {
-      await q(
+      const assigned = await q(
         `UPDATE users
          SET referred_by=$2
          WHERE id=$1
          AND EXISTS(
            SELECT 1 FROM users WHERE id=$2
-         )`,
+         )
+         RETURNING id`,
         [tu.id, refId]
       );
+
+      if (assigned.rowCount) {
+        /*
+         * Per-channel referral payouts (NEW): snapshot,
+         * for each gate channel, whether this brand-new
+         * user was ALREADY a member the moment they
+         * started via this referral link. Channels where
+         * was_member_before=true never pay the referrer —
+         * this is what stops "invite someone who already
+         * joined every channel" from earning anything.
+         */
+        await captureReferralBaseline(tu.id, refId);
+      }
     }
   } else {
     await q(
@@ -514,6 +613,299 @@ async function ensureUser(tu, refId) {
         tu.username || ''
       ]
     );
+  }
+}
+
+/* ---------- per-channel referral payouts (NEW) ---------- */
+
+/*
+ * Called once, the moment a brand-new user starts the bot
+ * through someone's referral link. Records, per gate
+ * channel, whether they were already a member at that
+ * instant — the baseline every later payout decision
+ * checks against.
+ */
+async function captureReferralBaseline(inviteeId, referrerId) {
+  const S = await settings();
+
+  let chans = Array.isArray(S.gate_channels)
+    ? S.gate_channels
+    : DEFAULT_GATE_CHANNELS;
+
+  if (!chans.length) {
+    chans = DEFAULT_GATE_CHANNELS;
+  }
+
+  for (const chat of chans) {
+    const r = await tg('getChatMember', {
+      chat_id: chat,
+      user_id: inviteeId
+    });
+
+    let wasMember = false;
+
+    if (r.ok) {
+      const st = r.result.status;
+
+      wasMember =
+        st === 'restricted'
+          ? !!r.result.is_member
+          : ['member', 'administrator', 'creator'].includes(st);
+    }
+
+    await q(
+      `INSERT INTO referral_channels(
+        invitee_id, channel, referrer_id,
+        was_member_before, currently_joined
+      )
+      VALUES($1,$2,$3,$4,$4)
+      ON CONFLICT (invitee_id, channel) DO NOTHING`,
+      [inviteeId, chat, referrerId, wasMember]
+    );
+  }
+}
+
+/*
+ * Called every time a user's real gate-channel membership
+ * is freshly checked (see checkGate below). Reacts to
+ * join/leave transitions for channels that were NOT
+ * already joined at referral time, pays the referrer once
+ * the invitee has stayed the configured minimum hold
+ * period, claws payment back if the invitee leaves soon
+ * after being paid, and pays a one-time full-completion
+ * bonus once every required channel has paid out.
+ */
+async function syncReferralChannels(inviteeId, channels) {
+  const rows = (
+    await q(
+      `SELECT * FROM referral_channels WHERE invitee_id=$1`,
+      [inviteeId]
+    )
+  ).rows;
+
+  if (!rows.length) return;
+
+  const S = await settings();
+  const byChannel = {};
+  rows.forEach((r) => {
+    byChannel[r.channel] = r;
+  });
+
+  const rewardFor = (chat) => {
+    const map = S.channel_rewards || {};
+    const v = map[chat];
+    return Number(v != null && v !== '' ? v : S.referral_reward || 0);
+  };
+
+  const minHoldMs =
+    Number(S.referral_min_hold_hours || 0) * 3600000;
+  const clawbackMs =
+    Number(S.referral_clawback_hours || 0) * 3600000;
+
+  for (const c of channels) {
+    const row = byChannel[c.chat];
+
+    /* no baseline row (channel added after this user joined), or
+       they were already a member before being invited: never pays */
+    if (!row || row.was_member_before) continue;
+
+    if (c.joined && !row.currently_joined) {
+      /* join event (first join, or a rejoin after leaving) */
+      await q(
+        `UPDATE referral_channels
+         SET currently_joined=true, joined_at=now()
+         WHERE invitee_id=$1 AND channel=$2`,
+        [inviteeId, c.chat]
+      );
+      row.currently_joined = true;
+      row.joined_at = new Date();
+    } else if (!c.joined && row.currently_joined) {
+      /* leave event */
+      if (row.paid && !row.clawed_back) {
+        const withinWindow =
+          row.paid_at &&
+          Date.now() - new Date(row.paid_at).getTime() <= clawbackMs;
+
+        if (withinWindow) {
+          const amt = rewardFor(c.chat);
+
+          await q(
+            `UPDATE users
+             SET coins=GREATEST(0, coins-$2),
+                 invite_coins=GREATEST(0, invite_coins-$2),
+                 flagged=true
+             WHERE id=$1`,
+            [row.referrer_id, amt]
+          );
+
+          await q(
+            `UPDATE users SET flagged=true WHERE id=$1`,
+            [inviteeId]
+          );
+
+          await q(
+            `UPDATE referral_channels
+             SET currently_joined=false, left_after_paid=true, clawed_back=true
+             WHERE invitee_id=$1 AND channel=$2`,
+            [inviteeId, c.chat]
+          );
+
+          await tg('sendMessage', {
+            chat_id: row.referrer_id,
+            text:
+              `⚠️ ${amt} coins were taken back: the friend you invited left ${c.chat} shortly after joining.`
+          }).catch(() => {});
+        } else {
+          await q(
+            `UPDATE referral_channels
+             SET currently_joined=false, left_after_paid=true
+             WHERE invitee_id=$1 AND channel=$2`,
+            [inviteeId, c.chat]
+          );
+        }
+      } else {
+        /*
+         * Not paid yet: reset the join clock. If they
+         * left-and-rejoin to game the hold period, they
+         * have to wait the full period again from the
+         * new join, and this channel still pays at most
+         * once (the row is never duplicated).
+         */
+        await q(
+          `UPDATE referral_channels
+           SET currently_joined=false, joined_at=NULL
+           WHERE invitee_id=$1 AND channel=$2`,
+          [inviteeId, c.chat]
+        );
+      }
+
+      row.currently_joined = false;
+    }
+
+    /* payout check */
+    if (!row.paid && row.currently_joined && row.joined_at) {
+      const heldMs = Date.now() - new Date(row.joined_at).getTime();
+
+      if (heldMs < minHoldMs) continue;
+
+      if (S.referral_require_activity) {
+        const act = (
+          await q(
+            `SELECT
+              EXISTS(SELECT 1 FROM ad_views WHERE user_id=$1 AND completed)
+              OR EXISTS(SELECT 1 FROM users WHERE id=$1 AND last_checkin IS NOT NULL)
+              AS did`,
+            [inviteeId]
+          )
+        ).rows[0].did;
+
+        if (!act) continue;
+      }
+
+      const cap = Number(S.referral_daily_cap || 0);
+
+      if (cap > 0) {
+        const cnt = (
+          await q(
+            `SELECT COUNT(*)::int AS c
+             FROM referral_channels
+             WHERE referrer_id=$1 AND paid AND paid_at::date=CURRENT_DATE`,
+            [row.referrer_id]
+          )
+        ).rows[0].c;
+
+        if (cnt >= cap) continue;
+      }
+
+      const referrer = (
+        await q(`SELECT flagged FROM users WHERE id=$1`, [row.referrer_id])
+      ).rows[0];
+
+      if (!referrer || referrer.flagged) continue;
+
+      const amt = rewardFor(c.chat);
+
+      await q(
+        `UPDATE users
+         SET coins=coins+$2, invite_coins=invite_coins+$2
+         WHERE id=$1`,
+        [row.referrer_id, amt]
+      );
+
+      await q(
+        `UPDATE referral_channels
+         SET paid=true, paid_at=now()
+         WHERE invitee_id=$1 AND channel=$2`,
+        [inviteeId, c.chat]
+      );
+
+      await q(
+        `UPDATE users SET referral_paid=true WHERE id=$1 AND NOT referral_paid`,
+        [inviteeId]
+      );
+
+      row.paid = true;
+
+      const invitee = (
+        await q(
+          `SELECT first_name, username FROM users WHERE id=$1`,
+          [inviteeId]
+        )
+      ).rows[0] || {};
+
+      const name = invitee.username
+        ? '@' + invitee.username
+        : invitee.first_name || 'Someone';
+
+      const remaining = (
+        await q(
+          `SELECT COUNT(*)::int AS c
+           FROM referral_channels
+           WHERE invitee_id=$1 AND NOT was_member_before AND NOT paid`,
+          [inviteeId]
+        )
+      ).rows[0].c;
+
+      await tg('sendMessage', {
+        chat_id: row.referrer_id,
+        text:
+          `🎉 ${name} joined ${c.chat} — you earned ${amt} coins!` +
+          (remaining > 0
+            ? `\n${remaining} more channel(s) for the full bonus.`
+            : '')
+      }).catch(() => {});
+
+      if (remaining === 0) {
+        const bonus = Number(S.referral_full_bonus || 0);
+
+        const already = (
+          await q(
+            `SELECT full_referral_bonus_paid FROM users WHERE id=$1`,
+            [inviteeId]
+          )
+        ).rows[0];
+
+        if (bonus > 0 && already && !already.full_referral_bonus_paid) {
+          await q(
+            `UPDATE users
+             SET coins=coins+$2, invite_coins=invite_coins+$2
+             WHERE id=$1`,
+            [row.referrer_id, bonus]
+          );
+
+          await q(
+            `UPDATE users SET full_referral_bonus_paid=true WHERE id=$1`,
+            [inviteeId]
+          );
+
+          await tg('sendMessage', {
+            chat_id: row.referrer_id,
+            text:
+              `🏆 ${name} joined every required channel! Full bonus: +${bonus} coins.`
+          }).catch(() => {});
+        }
+      }
+    }
   }
 }
 
@@ -752,6 +1144,17 @@ async function checkGate(user, force) {
     ]
   );
 
+  /*
+   * Per-channel referral payouts (NEW): every time we
+   * actually re-check membership (not served from cache),
+   * feed the fresh per-channel results to the payout/
+   * clawback logic. Failures here must never break the
+   * gate check itself.
+   */
+  syncReferralChannels(user.id, channels).catch((e) =>
+    console.error('syncReferralChannels', e)
+  );
+
   return {
     ok,
     channels
@@ -791,6 +1194,17 @@ const adminOnly = (
 /* ---------- referrals ---------- */
 
 async function processReferrals(uid) {
+  /*
+   * SUPERSEDED (NEW): referral payouts are now per-channel,
+   * handled by syncReferralChannels() as each channel's
+   * membership is (re)checked in checkGate(). This function
+   * is kept only so its call site in /api/me doesn't need
+   * removing, and now does nothing — the old flat "2 days
+   * of ads after joining every channel" payout is disabled
+   * to avoid paying twice for the same referral.
+   */
+  return;
+
   const S = await settings();
 
   const r = await q(
@@ -3217,17 +3631,30 @@ app.post(
 
 /* ---------- admin broadcast ---------- */
 
-async function broadcastAll(text) {
+/*
+ * keyboard (optional): [{ text: 'Open', url: 'https://...' }]
+ * — a single-button row shown under the broadcast message.
+ * Pass null/undefined for a plain text broadcast.
+ */
+async function broadcastAll(text, keyboard) {
   const { rows } = await q(
     'SELECT id FROM users WHERE NOT banned'
   );
 
   let sent = 0;
 
+  const payload = { text };
+
+  if (keyboard && keyboard.length) {
+    payload.reply_markup = {
+      inline_keyboard: [keyboard]
+    };
+  }
+
   for (const u of rows) {
     const r = await tg('sendMessage', {
       chat_id: u.id,
-      text
+      ...payload
     });
 
     if (r.ok) sent++;
@@ -3245,8 +3672,10 @@ app.post(
   auth,
   adminOnly,
   ah(async (req, res) => {
+    const b = req.body || {};
+
     const text = String(
-      (req.body || {}).text || (req.body || {}).message || ''
+      b.text || b.message || ''
     )
       .trim()
       .slice(0, 2000);
@@ -3255,11 +3684,31 @@ app.post(
       return fail(res, 400, 'bad_input');
     }
 
+    const btnText = String(
+      b.button_text || ''
+    )
+      .trim()
+      .slice(0, 30);
+
+    const btnUrl = String(
+      b.button_url || ''
+    ).trim();
+
+    let keyboard = null;
+
+    if (btnText && btnUrl) {
+      if (!/^https?:\/\//.test(btnUrl)) {
+        return fail(res, 400, 'bad_button_url');
+      }
+
+      keyboard = [{ text: btnText, url: btnUrl }];
+    }
+
     /*
      * Fire in the background — don't make the admin
      * panel wait for every user to be messaged.
      */
-    broadcastAll(text)
+    broadcastAll(text, keyboard)
       .then((sent) =>
         console.log('broadcast sent to', sent)
       )
@@ -3348,6 +3797,9 @@ app.post(
     }
 
     const sql = {
+      flag:
+        'UPDATE users SET flagged=true WHERE id=$1',
+
       unflag:
         'UPDATE users SET flagged=false WHERE id=$1',
 
@@ -3398,13 +3850,18 @@ async function handleUpdate(u) {
         r ? r[1] : null
       );
 
+      const S0 = await settings();
+      const supportLine = S0.support_bot_username
+        ? `\n\nNeed help? Contact @${S0.support_bot_username}`
+        : '';
+
       await tg(
         'sendMessage',
         {
           chat_id: m.chat.id,
-          text: r
+          text: (r
             ? 'Welcome to Adewa! You were invited by a friend — tap the button below to open the app.'
-            : 'Welcome to Adewa. Tap the button to open the app.',
+            : 'Welcome to Adewa. Tap the button to open the app.') + supportLine,
           reply_markup: {
             inline_keyboard: [
               [
@@ -3515,12 +3972,34 @@ async function handleUpdate(u) {
       m.text.startsWith('/broadcast ') &&
       isAdmin(from.id)
     ) {
-      const text = m.text
+      const raw = m.text
         .slice('/broadcast '.length)
         .trim();
 
+      /*
+       * /broadcast <message> || <button text> || <button url>
+       * The "|| button || url" part is optional — plain
+       * "/broadcast <message>" still works exactly as before.
+       */
+      const parts = raw.split('||').map((p) => p.trim());
+      const text = parts[0];
+      let keyboard = null;
+
+      if (parts.length >= 3 && parts[1] && parts[2]) {
+        if (/^https?:\/\//.test(parts[2])) {
+          keyboard = [{ text: parts[1].slice(0, 30), url: parts[2] }];
+        } else {
+          await tg('sendMessage', {
+            chat_id: from.id,
+            text: 'Button URL must start with http:// or https://. Broadcast not sent.'
+          });
+
+          return;
+        }
+      }
+
       if (text) {
-        broadcastAll(text).catch((e) =>
+        broadcastAll(text, keyboard).catch((e) =>
           console.error('broadcastAll', e)
         );
 
