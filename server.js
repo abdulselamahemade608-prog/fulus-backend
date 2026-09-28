@@ -54,6 +54,28 @@
  *   CREATE INDEX IF NOT EXISTS referral_channels_referrer_idx
  *     ON referral_channels(referrer_id);
  *
+ *   -- Verification / anti-fraud (NEW, ported from server 9).
+ *   -- The fraud_users table is also created automatically on first
+ *   -- use, so running this is optional:
+ *   CREATE TABLE IF NOT EXISTS fraud_users(
+ *     telegram_id bigint PRIMARY KEY,
+ *     username text NOT NULL DEFAULT '',
+ *     first_name text NOT NULL DEFAULT '',
+ *     ip_hash text NOT NULL DEFAULT '',
+ *     device_hash text NOT NULL DEFAULT '',
+ *     vpn_detected boolean NOT NULL DEFAULT false,
+ *     proxy_detected boolean NOT NULL DEFAULT false,
+ *     risk_score integer NOT NULL DEFAULT 0,
+ *     status text NOT NULL DEFAULT 'pending',
+ *     ban_reason text NOT NULL DEFAULT '',
+ *     verification_message_sent boolean NOT NULL DEFAULT false,
+ *     ban_message_sent boolean NOT NULL DEFAULT false,
+ *     admin_verified boolean NOT NULL DEFAULT false,
+ *     first_seen timestamptz NOT NULL DEFAULT now(),
+ *     last_seen timestamptz NOT NULL DEFAULT now(),
+ *     request_count integer NOT NULL DEFAULT 0
+ *   );
+ *
  * Also set this new environment variable on Vercel:
  *   CRON_SECRET = <any random string you pick>
  * It protects the two cron endpoints added below
@@ -944,8 +966,24 @@ const auth = ah(async (req, res, next) => {
     return fail(res, 404, 'user_not_found');
   }
 
-  if (u.banned) {
-    return fail(res, 403, 'banned');
+  await initFraud();
+
+  const fz = (
+    await q(
+      'SELECT status, ban_reason FROM fraud_users WHERE telegram_id=$1',
+      [u.id]
+    )
+  ).rows[0];
+
+  if (u.banned || (fz && fz.status === 'banned')) {
+    return fail(res, 403, 'banned', {
+      reason: (fz && fz.ban_reason) || 'Banned'
+    });
+  }
+
+  /* must pass POST /api/auth (verification) before using the app */
+  if (!fz || fz.status !== 'verified') {
+    return fail(res, 403, 'not_verified');
   }
 
   const dev = String(
@@ -1034,6 +1072,347 @@ const auth = ah(async (req, res, next) => {
 
   next();
 });
+
+/* ---------- Verification / anti-fraud (VPN + multi-account) ---------- */
+
+let fraudReady = null;
+
+function initFraud() {
+  if (fraudReady) return fraudReady;
+
+  fraudReady = (async () => {
+    await q(`CREATE TABLE IF NOT EXISTS fraud_users (
+      telegram_id BIGINT PRIMARY KEY,
+      username TEXT NOT NULL DEFAULT '',
+      first_name TEXT NOT NULL DEFAULT '',
+      ip_hash TEXT NOT NULL DEFAULT '',
+      device_hash TEXT NOT NULL DEFAULT '',
+      vpn_detected BOOLEAN NOT NULL DEFAULT FALSE,
+      proxy_detected BOOLEAN NOT NULL DEFAULT FALSE,
+      risk_score INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      ban_reason TEXT NOT NULL DEFAULT '',
+      verification_message_sent BOOLEAN NOT NULL DEFAULT FALSE,
+      ban_message_sent BOOLEAN NOT NULL DEFAULT FALSE,
+      admin_verified BOOLEAN NOT NULL DEFAULT FALSE,
+      first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      request_count INTEGER NOT NULL DEFAULT 0
+    )`);
+  })().catch((e) => {
+    fraudReady = null;
+    console.error('initFraud', e);
+    throw e;
+  });
+
+  return fraudReady;
+}
+
+const sha256 = (v) =>
+  crypto.createHash('sha256').update(String(v || '')).digest('hex');
+
+function getClientIP(req) {
+  const f = req.headers['x-forwarded-for'];
+  if (f) return String(f).split(',')[0].trim();
+  return req.headers['x-real-ip'] || (req.socket && req.socket.remoteAddress) || '';
+}
+
+function getBanType(reason) {
+  const r = String(reason || '').toLowerCase();
+  if (r.includes('vpn') || r.includes('proxy') || r.includes('tor')) return 'vpn';
+  if (r.includes('multiple') || r.includes('multi account')) return 'multi';
+  return 'other';
+}
+
+async function sendBanMessage(chatId, type) {
+  const tail = 'Your account has been permanently banned from Adewa.';
+
+  let text = tail;
+  if (type === 'vpn') text = `VPN/Proxy detected.\n\n${tail}`;
+  if (type === 'multi') text = `Multiple accounts detected.\n\n${tail}`;
+
+  const r = await tg('sendMessage', { chat_id: chatId, text });
+  return !!r.ok;
+}
+
+async function detectVPNProxy(ip) {
+  const result = { checked: false, vpn: false, proxy: false, tor: false, hosting: false, detected: false };
+  if (!ip) return result;
+
+  const clean = String(ip).replace(/^::ffff:/, '').trim();
+
+  if (
+    clean === '127.0.0.1' ||
+    clean === '::1' ||
+    clean.startsWith('10.') ||
+    clean.startsWith('192.168.') ||
+    clean.startsWith('172.16.')
+  ) {
+    return result;
+  }
+
+  try {
+    const response = await fetch(`https://ipwho.is/${encodeURIComponent(clean)}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(5000)
+    });
+
+    if (!response.ok) return result;
+
+    const data = await response.json();
+    if (!data || data.success === false) return result;
+
+    const sec = data.security || {};
+
+    result.checked = true;
+    result.vpn = sec.vpn === true;
+    result.proxy = sec.proxy === true;
+    result.tor = sec.tor === true;
+    result.hosting = sec.hosting === true;
+    result.detected = result.vpn || result.proxy || result.tor;
+
+    return result;
+  } catch (e) {
+    console.error('VPN detection error:', e.message);
+    return result;
+  }
+}
+
+async function detectMultiAccount(telegramId, ipHash, deviceHash) {
+  if (!deviceHash && !ipHash) return { detected: false, reason: '' };
+
+  if (deviceHash) {
+    const d = await q(
+      'SELECT telegram_id FROM fraud_users WHERE device_hash=$1 AND telegram_id<>$2 LIMIT 1',
+      [deviceHash, telegramId]
+    );
+
+    if (d.rows.length) {
+      return {
+        detected: true,
+        reason: 'Multiple Telegram accounts detected on the same device.'
+      };
+    }
+  }
+
+  if (ipHash) {
+    const i = await q(
+      `SELECT telegram_id, device_hash FROM fraud_users
+       WHERE ip_hash=$1 AND telegram_id<>$2 AND status='verified' LIMIT 1`,
+      [ipHash, telegramId]
+    );
+
+    if (i.rows.length) {
+      const old = i.rows[0].device_hash;
+
+      if (old && deviceHash && old !== deviceHash) {
+        return {
+          detected: true,
+          reason: 'Multiple Telegram accounts detected from the same IP address.'
+        };
+      }
+    }
+  }
+
+  return { detected: false, reason: '' };
+}
+
+async function recordBan(id, username, firstName, ipHash, deviceHash, vpn, proxy, reason) {
+  await q(
+    `INSERT INTO fraud_users
+       (telegram_id, username, first_name, ip_hash, device_hash, vpn_detected, proxy_detected,
+        risk_score, status, ban_reason, last_seen, request_count)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,100,'banned',$8,NOW(),1)
+     ON CONFLICT (telegram_id) DO UPDATE SET
+       username=EXCLUDED.username, first_name=EXCLUDED.first_name,
+       ip_hash=EXCLUDED.ip_hash, device_hash=EXCLUDED.device_hash,
+       vpn_detected=EXCLUDED.vpn_detected, proxy_detected=EXCLUDED.proxy_detected,
+       risk_score=100, status='banned', ban_reason=EXCLUDED.ban_reason,
+       last_seen=NOW(), request_count=fraud_users.request_count+1`,
+    [id, username, firstName, ipHash, deviceHash, vpn, proxy, reason]
+  );
+
+  await q('UPDATE users SET banned=true WHERE id=$1', [id]);
+}
+
+async function banUserById(telegramId, reason) {
+  await initFraud();
+
+  await q(
+    `INSERT INTO fraud_users (telegram_id, status, ban_reason, admin_verified, last_seen, request_count)
+     VALUES ($1,'banned',$2,FALSE,NOW(),1)
+     ON CONFLICT (telegram_id) DO UPDATE SET
+       status='banned', ban_reason=EXCLUDED.ban_reason, admin_verified=FALSE, last_seen=NOW()`,
+    [telegramId, reason || 'Admin ban']
+  );
+
+  await q('UPDATE users SET banned=true WHERE id=$1', [telegramId]);
+
+  await sendBanMessage(telegramId, getBanType(reason || 'Admin ban'));
+}
+
+async function unbanUserById(telegramId) {
+  await initFraud();
+
+  const r = await q(
+    `UPDATE fraud_users SET
+       status='verified', ban_reason='', vpn_detected=FALSE, proxy_detected=FALSE,
+       risk_score=0, ban_message_sent=FALSE, admin_verified=TRUE, last_seen=NOW()
+     WHERE telegram_id=$1 RETURNING telegram_id`,
+    [telegramId]
+  );
+
+  await q('UPDATE users SET banned=false WHERE id=$1', [telegramId]);
+
+  if (r.rows.length) {
+    await tg('sendMessage', {
+      chat_id: telegramId,
+      text: 'Your account has been unbanned. Send /start to continue.'
+    });
+  }
+
+  return r.rows[0] || null;
+}
+
+/*
+ * POST /api/auth  — the anti-fraud gate. The mini app calls this
+ * first on every open. Order: already banned -> multi-account ->
+ * VPN/proxy -> verified.
+ */
+app.post(
+  '/api/auth',
+  ah(async (req, res) => {
+    await initFraud();
+
+    const d = verifyInitData(req.headers['x-init-data']);
+
+    if (!d || !d.user) {
+      return res.status(401).json({
+        ok: false,
+        status: 'invalid',
+        error: 'bad_auth',
+        message: 'Invalid Telegram session.'
+      });
+    }
+
+    const user = d.user;
+    const telegramId = Number(user.id);
+    const username = user.username || '';
+    const firstName = user.first_name || '';
+
+    const deviceId = String(req.headers['x-device'] || '').trim();
+    const ip = getClientIP(req);
+    const ipHash = sha256(ip);
+    const deviceHash = sha256(deviceId);
+
+    /* make sure the user row (and referral link) exists */
+    const m = /^ref_(\d+)$/.exec(d.start || '');
+    await ensureUser(user, m ? m[1] : null);
+
+    const existing = (
+      await q('SELECT * FROM fraud_users WHERE telegram_id=$1 LIMIT 1', [telegramId])
+    ).rows[0];
+
+    /* already banned */
+    if (existing && existing.status === 'banned') {
+      await sendBanMessage(telegramId, getBanType(existing.ban_reason));
+
+      return res.status(403).json({
+        ok: false,
+        status: 'banned',
+        error: 'banned',
+        reason: existing.ban_reason,
+        message: 'Your account has been permanently banned.'
+      });
+    }
+
+    /* accounts an admin unbanned are trusted going forward */
+    const trusted = !!existing && existing.admin_verified === true;
+
+    /* 1) multi-account check first */
+    const multi = trusted
+      ? { detected: false }
+      : await detectMultiAccount(telegramId, ipHash, deviceHash);
+
+    if (multi.detected) {
+      await recordBan(telegramId, username, firstName, ipHash, deviceHash, false, false, multi.reason);
+      await sendBanMessage(telegramId, 'multi');
+
+      return res.status(403).json({
+        ok: false,
+        status: 'banned',
+        error: 'banned',
+        reason: multi.reason,
+        message: 'Multiple accounts detected. Your account has been permanently banned.'
+      });
+    }
+
+    /* 2) VPN / proxy check */
+    const net = trusted ? { detected: false } : await detectVPNProxy(ip);
+
+    if (net.detected) {
+      const reason = net.vpn
+        ? 'VPN detected'
+        : net.proxy
+        ? 'Proxy detected'
+        : net.tor
+        ? 'Tor detected'
+        : 'Restricted network detected';
+
+      await recordBan(
+        telegramId, username, firstName, ipHash, deviceHash,
+        net.vpn || net.tor, net.proxy, reason
+      );
+      await sendBanMessage(telegramId, 'vpn');
+
+      return res.status(403).json({
+        ok: false,
+        status: 'banned',
+        error: 'banned',
+        reason,
+        message: 'VPN/Proxy detected. Your account has been permanently banned.'
+      });
+    }
+
+    /* 3) normal user -> verified */
+    await q(
+      `INSERT INTO fraud_users
+         (telegram_id, username, first_name, ip_hash, device_hash, vpn_detected, proxy_detected,
+          risk_score, status, ban_reason, last_seen, request_count)
+       VALUES ($1,$2,$3,$4,$5,FALSE,FALSE,0,'verified','',NOW(),1)
+       ON CONFLICT (telegram_id) DO UPDATE SET
+         username=EXCLUDED.username, first_name=EXCLUDED.first_name,
+         ip_hash=EXCLUDED.ip_hash, device_hash=EXCLUDED.device_hash,
+         status='verified', last_seen=NOW(), request_count=fraud_users.request_count+1`,
+      [telegramId, username, firstName, ipHash, deviceHash]
+    );
+
+    const sent = (
+      await q('SELECT verification_message_sent FROM fraud_users WHERE telegram_id=$1', [telegramId])
+    ).rows[0];
+
+    if (!sent || !sent.verification_message_sent) {
+      const r = await tg('sendMessage', {
+        chat_id: telegramId,
+        text: 'Your verification is successful.'
+      });
+
+      if (r.ok) {
+        await q(
+          'UPDATE fraud_users SET verification_message_sent=TRUE WHERE telegram_id=$1',
+          [telegramId]
+        );
+      }
+    }
+
+    return res.json({
+      ok: true,
+      status: 'verified',
+      admin: isAdmin(telegramId),
+      message: 'Verified.'
+    });
+  })
+);
 
 /* ---------- Gate ---------- */
 
@@ -3796,18 +4175,24 @@ app.post(
       );
     }
 
+    if (action === 'ban') {
+      await banUserById(Number(id), 'Admin ban');
+
+      return res.json({ ok: true });
+    }
+
+    if (action === 'unban') {
+      await unbanUserById(Number(id));
+
+      return res.json({ ok: true });
+    }
+
     const sql = {
       flag:
         'UPDATE users SET flagged=true WHERE id=$1',
 
       unflag:
-        'UPDATE users SET flagged=false WHERE id=$1',
-
-      ban:
-        'UPDATE users SET banned=true WHERE id=$1',
-
-      unban:
-        'UPDATE users SET banned=false WHERE id=$1'
+        'UPDATE users SET flagged=false WHERE id=$1'
     }[action];
 
     if (!sql) {
@@ -3879,6 +4264,46 @@ async function handleUpdate(u) {
           }
         }
       );
+
+      return;
+    }
+
+    /* ---------- /ban  /unban (admin) ---------- */
+
+    if (
+      m.text &&
+      (m.text.startsWith('/ban ') || m.text.startsWith('/unban ')) &&
+      isAdmin(from.id)
+    ) {
+      const cmd = m.text.split(' ')[0].split('@')[0];
+      const target = Number(m.text.split(' ')[1]);
+
+      if (!Number.isFinite(target)) {
+        await tg('sendMessage', {
+          chat_id: from.id,
+          text: `Usage: ${cmd} <telegram_id>`
+        });
+
+        return;
+      }
+
+      if (cmd === '/ban') {
+        await banUserById(target, 'Admin ban');
+
+        await tg('sendMessage', {
+          chat_id: from.id,
+          text: `User ${target} has been banned.`
+        });
+      } else {
+        const done = await unbanUserById(target);
+
+        await tg('sendMessage', {
+          chat_id: from.id,
+          text: done
+            ? `User ${target} has been unbanned.`
+            : `User ${target} was not found.`
+        });
+      }
 
       return;
     }
@@ -4309,524 +4734,4 @@ async function handleUpdate(u) {
     );
 
     /*
-     * Multiple admin support.
-     */
-    if (!isAdmin(cq.from.id)) {
-      console.log(
-        'callback rejected: sender is not in ADMIN_IDS',
-        cq.from.id
-      );
-
-      await tg(
-        'answerCallbackQuery',
-        {
-          callback_query_id:
-            cq.id
-        }
-      );
-
-      return;
-    }
-
-    try {
-
-    const [
-      kind,
-      act,
-      id
-    ] = String(
-      cq.data
-    ).split(':');
-
-    let note = 'Done';
-
-    /* ---------- task ---------- */
-
-    if (kind === 't') {
-      if (act === 'a') {
-        const r = await q(
-          `UPDATE task_subs
-           SET status='approved'
-           WHERE id=$1
-             AND status='pending'
-           RETURNING
-             task_id,
-             user_id`,
-          [id]
-        );
-
-        console.log(
-          'task approve: id=' + id,
-          'rowCount=' + r.rowCount
-        );
-
-        if (r.rowCount) {
-          const tk = (
-            await q(
-              `SELECT
-                reward,
-                title
-               FROM tasks
-               WHERE id=$1`,
-              [
-                r.rows[0]
-                  .task_id
-              ]
-            )
-          ).rows[0];
-
-          await q(
-            `UPDATE users
-             SET coins=coins+$2,
-                 daily_ads =
-                   CASE WHEN daily_earn_day=CURRENT_DATE
-                     THEN daily_ads ELSE 0 END,
-                 daily_invite =
-                   CASE WHEN daily_earn_day=CURRENT_DATE
-                     THEN daily_invite ELSE 0 END,
-                 daily_task =
-                   CASE WHEN daily_earn_day=CURRENT_DATE
-                     THEN daily_task+$2 ELSE $2 END,
-                 daily_earn_day=CURRENT_DATE
-             WHERE id=$1`,
-            [
-              r.rows[0].user_id,
-              tk.reward
-            ]
-          );
-
-          await finishTask(
-            r.rows[0].task_id
-          );
-
-          await tg(
-            'sendMessage',
-            {
-              chat_id:
-                r.rows[0].user_id,
-              text:
-                `Task approved: ${tk.title}. You earned ${tk.reward} coins.`
-            }
-          );
-
-          note = '✅ Approved';
-        } else {
-          note =
-            'Already handled';
-        }
-      } else {
-        const r = await q(
-          `UPDATE task_subs
-           SET status='rejected'
-           WHERE id=$1
-             AND status='pending'
-           RETURNING user_id`,
-          [id]
-        );
-
-        if (r.rowCount) {
-          await tg(
-            'sendMessage',
-            {
-              chat_id:
-                r.rows[0].user_id,
-              text:
-                'Your task proof was rejected. Open the app to try again.'
-            }
-          );
-
-          note = '❌ Rejected';
-        } else {
-          note =
-            'Already handled';
-        }
-      }
-    }
-
-    /* ---------- withdrawal ---------- */
-
-    else if (kind === 'w') {
-      if (act === 'a') {
-        const r = await q(
-          `UPDATE withdrawals
-           SET status='paid',
-               decided_at=now()
-           WHERE id=$1
-             AND status='pending'
-           RETURNING
-             user_id,
-             etb`,
-          [id]
-        );
-
-        if (r.rowCount) {
-          await q(
-            `INSERT INTO settings(
-              key,
-              value
-            )
-            VALUES(
-              'awaiting_proof',
-              $1
-            )
-            ON CONFLICT(key)
-            DO UPDATE SET
-              value=$1`,
-            [
-              JSON.stringify({
-                wid: Number(id)
-              })
-            ]
-          );
-
-          await tg(
-            'sendMessage',
-            {
-              chat_id:
-                r.rows[0].user_id,
-              text:
-                `💸 New Withdrawal requests accepted \n` +
-                `----------------\n` +
-                `💵 Amount: ${Number(r.rows[0].etb).toFixed(2)} Birr\n` +
-                `🔍 Status: Paid \n` +
-                `-------------------------------\n\n` +
-                `🤖 Proof channel: ${PROOF_CHANNEL}`
-            }
-          );
-
-          /*
-           * Tell the admin who clicked.
-           */
-          await tg(
-            'sendMessage',
-            {
-              chat_id:
-                cq.from.id,
-              text:
-                'Send the payment screenshot now to post it in the proof channel, or send /skip.'
-            }
-          );
-
-          note =
-            '✅ Marked as paid';
-        } else {
-          note =
-            'Already handled';
-        }
-      } else {
-        const r = await q(
-          `UPDATE withdrawals
-           SET status='rejected',
-               decided_at=now()
-           WHERE id=$1
-             AND status='pending'
-           RETURNING
-             user_id,
-             coins,
-             etb,
-             method,
-             from_ads,
-             from_invite`,
-          [id]
-        );
-
-        if (r.rowCount) {
-          await q(
-            `UPDATE users
-             SET coins=coins+$2,
-                 ads_coins=ads_coins+$3,
-                 invite_coins=invite_coins+$4,
-                 last_withdraw_at=NULL
-             WHERE id=$1`,
-            [
-              r.rows[0].user_id,
-              r.rows[0].coins,
-              r.rows[0].from_ads,
-              r.rows[0].from_invite
-            ]
-          );
-
-          await tg(
-            'sendMessage',
-            {
-              chat_id:
-                r.rows[0].user_id,
-              text:
-                `💸 New Withdrawal requests rejected \n` +
-                `----------------\n` +
-                `💵 Requested Amount: ${Number(r.rows[0].etb).toFixed(2)} Birr\n` +
-                `        Reback to Your balance \n` +
-                `🔍 Status: Rejected`
-            }
-          );
-
-          note =
-            '❌ Rejected and refunded';
-        } else {
-          note =
-            'Already handled';
-        }
-      }
-    }
-
-    await tg(
-      'answerCallbackQuery',
-      {
-        callback_query_id:
-          cq.id,
-        text: note
-      }
-    );
-
-    if (cq.message) {
-      await tg(
-        'editMessageReplyMarkup',
-        {
-          chat_id:
-            cq.message.chat.id,
-          message_id:
-            cq.message.message_id,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: note,
-                  callback_data:
-                    'noop'
-                }
-              ]
-            ]
-          }
-        }
-      );
-    }
-
-    } catch (e) {
-      /*
-       * Any error in the block above used to fail
-       * silently (the webhook route always answers
-       * Telegram with 200). Now the admin sees exactly
-       * what broke instead of the button doing nothing.
-       */
-      console.error('callback_query error:', e);
-
-      await tg('answerCallbackQuery', {
-        callback_query_id: cq.id,
-        text: 'Error: ' + String(e.message || e).slice(0, 190),
-        show_alert: true
-      }).catch(() => {});
-    }
-  }
-}
-
-/* ---------- cron: daily streak reminder ---------- */
-
-const cronAuth = (req, res, next) =>
-  CRON_SECRET &&
-  req.headers['x-cron-key'] === CRON_SECRET
-    ? next()
-    : fail(res, 403, 'cron_forbidden');
-
-/*
- * Call this once a day (evening, local time) from
- * Vercel Cron. Warns anyone who checked in yesterday
- * but not yet today that their streak will be lost.
- */
-app.all(
-  '/api/cron/streak-reminder',
-  cronAuth,
-  ah(async (req, res) => {
-    const t = todayStr();
-
-    const { rows } = await q(
-      `SELECT id, lang, streak
-       FROM users
-       WHERE NOT banned
-         AND streak > 0
-         AND last_checkin::text <> $1
-         AND last_checkin::text =
-           (
-             $1::date - 1
-           )::text`,
-      [t]
-    );
-
-    for (const u of rows) {
-      await tg('sendMessage', {
-        chat_id: u.id,
-        text: `🔥 Your ${u.streak}-day streak will be lost if you don't check in today! Open the app now.`
-      }).catch(() => {});
-
-      await new Promise((r) =>
-        setTimeout(r, 40)
-      );
-    }
-
-    res.json({
-      ok: true,
-      notified: rows.length
-    });
-  })
-);
-
-/* ---------- cron: weekly rewards ---------- */
-
-/*
- * Call this once a week (e.g. Sunday night) from
- * Vercel Cron. Pays the top inviter (if they cleared
- * the minimum invite count) and gives the top
- * ad-watcher of the week unlimited ads for 7 days.
- */
-app.all(
-  '/api/cron/weekly-rewards',
-  cronAuth,
-  ah(async (req, res) => {
-    const S = await settings();
-
-    const result = {
-      top_inviter: null,
-      top_ad_watcher: null
-    };
-
-    /* ---- top inviter ---- */
-
-    const minInvites = Number(
-      S.weekly_top_inviter_min || 200
-    );
-
-    const bonusEtb = Number(
-      S.weekly_top_inviter_bonus_etb || 0
-    );
-
-    const inviter = (
-      await q(
-        `SELECT
-          u.id,
-          COUNT(*)::int AS invites
-         FROM users ref
-         JOIN users u
-           ON u.id=ref.referred_by
-         WHERE ref.referral_paid
-           AND ref.created_at >
-             now() - interval '7 days'
-         GROUP BY u.id
-         HAVING COUNT(*) >= $1
-         ORDER BY invites DESC
-         LIMIT 1`,
-        [minInvites]
-      )
-    ).rows[0];
-
-    if (inviter && bonusEtb > 0) {
-      const bonusCoins = Math.round(
-        bonusEtb *
-          Number(S.coin_per_etb || 1)
-      );
-
-      await q(
-        `UPDATE users
-         SET coins=coins+$2
-         WHERE id=$1`,
-        [inviter.id, bonusCoins]
-      );
-
-      await tg('sendMessage', {
-        chat_id: inviter.id,
-        text:
-          `🏆 You were this week's top inviter (${inviter.invites} invites)! ` +
-          `Bonus: ${bonusEtb} ETB (${bonusCoins} coins) has been added to your balance.`
-      }).catch(() => {});
-
-      result.top_inviter = inviter;
-    }
-
-    /* ---- top ad watcher ---- */
-
-    const watcher = (
-      await q(
-        `SELECT
-          u.id,
-          COUNT(*)::int AS ads
-         FROM ad_views a
-         JOIN users u
-           ON u.id=a.user_id
-         WHERE a.completed
-           AND a.started_at >
-             now() - interval '7 days'
-         GROUP BY u.id
-         ORDER BY ads DESC
-         LIMIT 1`
-      )
-    ).rows[0];
-
-    if (watcher) {
-      await q(
-        `UPDATE users
-         SET vip_unlimited_until=
-           now() + interval '7 days'
-         WHERE id=$1`,
-        [watcher.id]
-      );
-
-      await tg('sendMessage', {
-        chat_id: watcher.id,
-        text:
-          `🏆 You watched the most ads this week (${watcher.ads})! ` +
-          `You now have unlimited ads for the next 7 days.`
-      }).catch(() => {});
-
-      result.top_ad_watcher = watcher;
-    }
-
-    res.json({
-      ok: true,
-      ...result
-    });
-  })
-);
-
-/* ---------- webhook ---------- */
-
-app.post(
-  '/api/webhook',
-  async (req, res) => {
-    if (
-      WEBHOOK_SECRET &&
-      req.headers[
-        'x-telegram-bot-api-secret-token'
-      ] !== WEBHOOK_SECRET
-    ) {
-      return res.sendStatus(403);
-    }
-
-    try {
-      await handleUpdate(
-        req.body || {}
-      );
-    } catch (e) {
-      console.error(
-        'webhook',
-        e
-      );
-    }
-
-    res.sendStatus(200);
-  }
-);
-
-/* ---------- export ---------- */
-
-module.exports = app;
-
-if (require.main === module) {
-  app.listen(
-    process.env.PORT || 3000,
-    () => {
-      console.log(
-        `Adewa server running on port ${
-          process.env.PORT || 3000
-        }`
-      );
-    }
-  );
-  }
+     * 
