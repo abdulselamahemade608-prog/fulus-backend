@@ -2,6 +2,29 @@
 
 /*
  * ---------------------------------------------------------
+ * CRYPTO WITHDRAWALS (BEP20 USDT + TON)  -  setup
+ *
+ *   npm i ethers @ton/ton @ton/crypto @ton/core
+ *
+ * Vercel environment variables (NEVER put these in the code
+ * or in the frontend):
+ *
+ *   BSC_PRIVATE_KEY   private key of the BSC wallet that holds
+ *                     USDT (BEP20) + a little BNB for gas
+ *   TON_MNEMONIC      24 words of the TON payout wallet
+ *   TON_WALLET_ADDRESS  optional, defaults to the wallet below.
+ *                     The mnemonic MUST belong to this address,
+ *                     otherwise the payout is refused.
+ *   TONCENTER_API_KEY optional but recommended (toncenter.com)
+ *   BSC_RPC           optional, default public BSC node
+ *
+ * A method only appears in the app when its secret is set.
+ * Use a dedicated payout wallet with limited funds.
+ * ---------------------------------------------------------
+ */
+
+/*
+ * ---------------------------------------------------------
  * ONE-TIME DATABASE MIGRATION
  * Run this once against your Postgres database before
  * deploying this version (psql / any SQL client):
@@ -135,6 +158,27 @@ const MINI_APP_URL =
 const BOT_USERNAME =
   process.env.BOT_USERNAME || '';
 
+/* ---------- crypto payout config ---------- */
+
+const TON_WALLET_ADDRESS =
+  process.env.TON_WALLET_ADDRESS ||
+  'UQBnqsss4HOg3WLfxSaL1LsUOebC9fxh0xZuQNcEnPR3Y5Wj';
+
+const TON_MNEMONIC = process.env.TON_MNEMONIC || '';
+const TONCENTER_API_KEY = process.env.TONCENTER_API_KEY || '';
+
+const TONCENTER_ENDPOINT =
+  process.env.TONCENTER_ENDPOINT ||
+  'https://toncenter.com/api/v2/jsonRPC';
+
+const BSC_PRIVATE_KEY = process.env.BSC_PRIVATE_KEY || '';
+const BSC_RPC = process.env.BSC_RPC || 'https://bsc-dataseed.binance.org';
+
+/* USDT on BNB Smart Chain (BEP20), 18 decimals */
+const USDT_BSC = '0x55d398326f99059fF775485246999027B3197955';
+
+const CRYPTO_METHODS = ['bep20', 'ton'];
+
 /*
  * ---------- AI FAQ / admin assistant (NEW) ----------
  * Answers ordinary user questions automatically using
@@ -179,7 +223,11 @@ If you don't know a specific number (exact fee %, exact minimum withdrawal, exac
 const WITHDRAW_METHODS = {
   telebirr: /^09\d{8}$/,
   mpesa: /^07\d{8}$/,
-  cbe: /^(1000\d{9}|10000\d{8})$/
+  cbe: /^(1000\d{9}|10000\d{8})$/,
+
+  /* crypto (paid automatically when the admin approves) */
+  bep20: /^0x[a-fA-F0-9]{40}$/,
+  ton: /^([A-Za-z0-9_-]{48}|-?\d:[a-fA-F0-9]{64})$/
 };
 
 /*
@@ -533,6 +581,24 @@ async function settings() {
     v.referral_full_bonus = 0;
   }
 
+  if (
+    v.etb_per_usd === undefined ||
+    v.etb_per_usd === null ||
+    v.etb_per_usd === ''
+  ) {
+    /* Birr per 1 USD used for crypto payouts. Set the real rate in admin. */
+    v.etb_per_usd = 150;
+  }
+
+  if (
+    v.ton_usd_price === undefined ||
+    v.ton_usd_price === null ||
+    v.ton_usd_price === ''
+  ) {
+    /* fallback only; live price is fetched when paying (0 = no fallback) */
+    v.ton_usd_price = 0;
+  }
+
   sCache = {
     t: Date.now(),
     v
@@ -582,7 +648,11 @@ const SETTING_KEYS = [
   'referral_daily_cap',
   'referral_require_activity',
   'referral_full_bonus',
-  'support_bot_username'
+  'support_bot_username',
+
+  /* --- crypto payouts --- */
+  'etb_per_usd',
+  'ton_usd_price'
 ];
 
 /* ---------- users ---------- */
@@ -2082,9 +2152,13 @@ app.get(
           interval_h:
             S.withdraw_interval_hours,
 
-          methods: Object.keys(
-            WITHDRAW_METHODS
-          ),
+          methods: availableMethods(),
+
+          etb_per_usd:
+            Number(S.etb_per_usd || 0),
+
+          ton_usd:
+            tonUsdCache.v || Number(S.ton_usd_price || 0),
 
           ads_enabled:
             S.ads_payment_enabled !== false,
@@ -3175,12 +3249,18 @@ app.get(
   '/api/withdrawals',
   auth,
   ah(async (req, res) => {
+    await ensureCryptoCols();
+
     const { rows } = await q(
       `SELECT
         id,
         etb,
         method,
+        account,
         status,
+        tx_hash,
+        paid_amount,
+        paid_asset,
         created_at
        FROM withdrawals
        WHERE user_id=$1
@@ -3251,7 +3331,7 @@ app.post(
       b.account || ''
     )
       .trim()
-      .slice(0, 32);
+      .slice(0, 80);
 
     const holderName = String(
       b.holder_name || b.owner_name || ''
@@ -3270,19 +3350,24 @@ app.post(
       );
     }
 
+    const isCrypto = CRYPTO_METHODS.includes(method);
+
     if (
-      !WITHDRAW_METHODS[method].test(
-        account
-      )
+      isCrypto &&
+      !availableMethods().includes(method)
     ) {
+      return fail(res, 423, 'crypto_off');
+    }
+
+    if (!WITHDRAW_METHODS[method].test(account)) {
       return fail(
         res,
         400,
-        'bad_phone'
+        isCrypto ? 'bad_address' : 'bad_phone'
       );
     }
 
-    if (holderName.length < 3) {
+    if (!isCrypto && holderName.length < 3) {
       return fail(
         res,
         400,
@@ -3367,10 +3452,7 @@ app.post(
             0
           ) AS s
          FROM withdrawals
-         WHERE status IN (
-           'pending',
-           'paid'
-         )
+         WHERE status IN ('pending','processing','paid')
            AND (
              created_at
              AT TIME ZONE 'UTC'
@@ -3481,13 +3563,30 @@ app.post(
       )
     ).rows[0];
 
-    const text =
+    let text =
       `Withdrawal #${w.id}\n` +
       `User: ${u.first_name} (ID: ${u.id}) @${u.username || '-'}\n` +
       `Amount: ${etb} ETB\n` +
       `Method: ${method}\n` +
       `Account: ${account}\n` +
-      `Holder name: ${holderName}`;
+      `Holder name: ${holderName || '-'}`;
+
+    if (isCrypto) {
+      let payLine = '';
+
+      try {
+        const qt = await cryptoQuote({ etb, method }, S);
+
+        payLine =
+          `\nNetwork: ${method === 'bep20' ? 'BEP20 (BNB Smart Chain)' : 'TON'}` +
+          `\nFee: ${S.withdraw_fee_percent || 0}%` +
+          `\nWill pay: ${qt.amount} ${qt.asset}`;
+      } catch (e) {
+        payLine = `\nNetwork: ${method.toUpperCase()}\n(Quote error: ${e.message})`;
+      }
+
+      text += payLine + '\n\nPress Approve & Pay to send the crypto automatically.';
+    }
 
     /*
      * Send withdrawal request
@@ -3503,7 +3602,7 @@ app.post(
             inline_keyboard: [
               [
                 {
-                  text: '✅ Paid',
+                  text: isCrypto ? '✅ Approve & Pay' : '✅ Paid',
                   style: 'success',
                   callback_data:
                     `w:a:${w.id}`
@@ -4218,6 +4317,434 @@ app.post(
   })
 );
 
+/* =========================================================
+   CRYPTO PAYOUTS  (BEP20 USDT + TON)
+========================================================= */
+
+const tonUsdCache = { t: 0, v: 0 };
+
+function availableMethods() {
+  return Object.keys(WITHDRAW_METHODS).filter((m) => {
+    if (m === 'bep20') return !!BSC_PRIVATE_KEY;
+    if (m === 'ton') return !!TON_MNEMONIC;
+    return true;
+  });
+}
+
+let cryptoColsReady = null;
+
+function ensureCryptoCols() {
+  if (!cryptoColsReady) {
+    cryptoColsReady = q(
+      `ALTER TABLE withdrawals
+         ADD COLUMN IF NOT EXISTS tx_hash text,
+         ADD COLUMN IF NOT EXISTS paid_amount numeric,
+         ADD COLUMN IF NOT EXISTS paid_asset text,
+         ADD COLUMN IF NOT EXISTS pay_error text`
+    ).catch((e) => {
+      cryptoColsReady = null;
+      throw e;
+    });
+  }
+
+  return cryptoColsReady;
+}
+
+async function getTonUsd(S) {
+  if (Date.now() - tonUsdCache.t < 300000 && tonUsdCache.v > 0) {
+    return tonUsdCache.v;
+  }
+
+  try {
+    const r = await fetch(
+      'https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd',
+      { signal: AbortSignal.timeout(5000) }
+    );
+
+    const j = await r.json();
+    const p = Number(j && j['the-open-network'] && j['the-open-network'].usd);
+
+    if (p > 0) {
+      tonUsdCache.t = Date.now();
+      tonUsdCache.v = p;
+      return p;
+    }
+  } catch (e) {
+    console.error('ton price', e.message);
+  }
+
+  const fb = Number((S && S.ton_usd_price) || 0);
+
+  if (fb > 0) return fb;
+
+  throw new Error('TON price unavailable (set ton_usd_price in admin settings).');
+}
+
+/*
+ * Final amount the user actually receives:
+ *   ETB requested - service fee  ->  USD  ->  USDT or TON
+ */
+async function cryptoQuote(w, S) {
+  const etb = Number(w.etb);
+  const fee = Number(S.withdraw_fee_percent || 0);
+  const perUsd = Number(S.etb_per_usd || 0);
+
+  if (!(perUsd > 0)) {
+    throw new Error('Set etb_per_usd in admin settings first.');
+  }
+
+  const feeEtb = Math.round(etb * fee) / 100;
+  const finalEtb = Math.round((etb - feeEtb) * 100) / 100;
+  const usd = finalEtb / perUsd;
+
+  if (w.method === 'bep20') {
+    return {
+      asset: 'USDT',
+      amount: Math.floor(usd * 100) / 100,
+      feeEtb,
+      finalEtb,
+      fee
+    };
+  }
+
+  const price = await getTonUsd(S);
+
+  return {
+    asset: 'TON',
+    amount: Math.floor((usd / price) * 10000) / 10000,
+    feeEtb,
+    finalEtb,
+    fee
+  };
+}
+
+async function payBep20(to, amount, onSent) {
+  const { ethers } = require('ethers');
+
+  const provider = new ethers.JsonRpcProvider(BSC_RPC);
+  const wallet = new ethers.Wallet(BSC_PRIVATE_KEY, provider);
+
+  const usdt = new ethers.Contract(
+    USDT_BSC,
+    [
+      'function transfer(address,uint256) returns (bool)',
+      'function balanceOf(address) view returns (uint256)'
+    ],
+    wallet
+  );
+
+  const value = ethers.parseUnits(amount.toFixed(2), 18);
+
+  const bal = await usdt.balanceOf(wallet.address);
+
+  if (bal < value) {
+    throw new Error('Not enough USDT in the BEP20 payout wallet.');
+  }
+
+  const tx = await usdt.transfer(to, value);
+
+  await onSent(tx.hash);
+
+  return { hash: tx.hash };
+}
+
+function b64ToHex(h) {
+  return /^[0-9a-fA-F]{64}$/.test(h)
+    ? h.toLowerCase()
+    : Buffer.from(h, 'base64').toString('hex');
+}
+
+async function tonTxHashByMessage(msgHash) {
+  for (let i = 0; i < 3; i++) {
+    await sleepMs(1500);
+
+    try {
+      const r = await fetch(
+        `https://toncenter.com/api/v3/transactionsByMessage?msg_hash=${msgHash}&direction=in&limit=1`,
+        {
+          headers: TONCENTER_API_KEY ? { 'X-API-Key': TONCENTER_API_KEY } : {},
+          signal: AbortSignal.timeout(4000)
+        }
+      );
+
+      const j = await r.json();
+      const tx = j && j.transactions && j.transactions[0];
+
+      if (tx && tx.hash) return b64ToHex(tx.hash);
+    } catch (e) {
+      /* try again */
+    }
+  }
+
+  return null;
+}
+
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function payTon(to, amount, memo, onSent) {
+  const {
+    TonClient,
+    WalletContractV4,
+    WalletContractV5R1,
+    internal,
+    external,
+    storeMessage,
+    SendMode,
+    Address,
+    toNano,
+    beginCell
+  } = require('@ton/ton');
+
+  const { mnemonicToPrivateKey } = require('@ton/crypto');
+
+  const key = await mnemonicToPrivateKey(
+    TON_MNEMONIC.trim().split(/\s+/)
+  );
+
+  const target = Address.parse(TON_WALLET_ADDRESS);
+
+  const candidates = [];
+
+  if (WalletContractV5R1) {
+    candidates.push(
+      WalletContractV5R1.create({ publicKey: key.publicKey, workchain: 0 })
+    );
+  }
+
+  candidates.push(
+    WalletContractV4.create({ publicKey: key.publicKey, workchain: 0 })
+  );
+
+  const wallet = candidates.find((c) => c.address.equals(target));
+
+  if (!wallet) {
+    throw new Error(
+      'TON_MNEMONIC does not belong to ' + TON_WALLET_ADDRESS + ' (payout refused).'
+    );
+  }
+
+  const client = new TonClient({
+    endpoint: TONCENTER_ENDPOINT,
+    apiKey: TONCENTER_API_KEY || undefined
+  });
+
+  const contract = client.open(wallet);
+
+  const value = toNano(amount.toFixed(4));
+  const balance = await contract.getBalance();
+
+  if (balance < value + toNano('0.05')) {
+    throw new Error('Not enough TON in the payout wallet.');
+  }
+
+  const seqno = await contract.getSeqno();
+
+  const transfer = contract.createTransfer({
+    seqno,
+    secretKey: key.secretKey,
+    sendMode: SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS,
+    messages: [
+      internal({
+        to: Address.parse(to),
+        value,
+        bounce: false,
+        body: memo
+      })
+    ]
+  });
+
+  await contract.send(transfer);
+
+  const ext = external({
+    to: wallet.address,
+    init: seqno === 0 ? wallet.init : undefined,
+    body: transfer
+  });
+
+  const msgHash = beginCell()
+    .store(storeMessage(ext))
+    .endCell()
+    .hash()
+    .toString('hex');
+
+  /* remember the hash immediately, in case the request is cut short */
+  await onSent(msgHash);
+
+  const txHash = await tonTxHashByMessage(msgHash);
+
+  return { hash: txHash || msgHash };
+}
+
+const explorerLink = (method, hash) =>
+  method === 'bep20'
+    ? `https://bscscan.com/tx/${hash}`
+    : `https://tonviewer.com/transaction/${hash}`;
+
+const shortAddr = (a) =>
+  a.length > 16 ? `${a.slice(0, 6)}...${a.slice(-6)}` : a;
+
+/*
+ * Admin pressed "Approve & Pay" on a crypto withdrawal.
+ * Order: claim (pending -> processing, so a double tap can never
+ * pay twice) -> compute final amount -> send -> save hash ->
+ * mark paid -> tell the user -> post to the proof channel.
+ */
+async function approveCryptoWithdrawal(id, cq) {
+  await ensureCryptoCols();
+
+  const claim = await q(
+    `UPDATE withdrawals
+     SET status='processing', decided_at=now(), pay_error=NULL
+     WHERE id=$1 AND status='pending' AND method = ANY($2)
+     RETURNING *`,
+    [id, CRYPTO_METHODS]
+  );
+
+  if (!claim.rowCount) {
+    return { note: 'Already handled' };
+  }
+
+  const w = claim.rows[0];
+  const S = await settings();
+
+  try {
+    const quote = await cryptoQuote(
+      { etb: Number(w.etb), method: w.method },
+      S
+    );
+
+    if (!(quote.amount > 0)) {
+      throw new Error('Amount is too small to send.');
+    }
+
+    const onSent = (hash) =>
+      q(
+        `UPDATE withdrawals
+         SET tx_hash=$2, paid_amount=$3, paid_asset=$4
+         WHERE id=$1`,
+        [w.id, hash, quote.amount, quote.asset]
+      );
+
+    const sent =
+      w.method === 'bep20'
+        ? await payBep20(w.account, quote.amount, onSent)
+        : await payTon(w.account, quote.amount, `Adewa #${w.id}`, onSent);
+
+    await q(
+      `UPDATE withdrawals
+       SET status='paid', tx_hash=$2, paid_amount=$3, paid_asset=$4,
+           pay_error=NULL, decided_at=now()
+       WHERE id=$1`,
+      [w.id, sent.hash, quote.amount, quote.asset]
+    );
+
+    const link = explorerLink(w.method, sent.hash);
+    const net = w.method === 'bep20' ? 'BEP20' : 'TON';
+
+    /* 1) the user */
+    await tg('sendMessage', {
+      chat_id: w.user_id,
+      text:
+        `💸 Withdrawal paid\n` +
+        `----------------\n` +
+        `🌐 Network: ${net}\n` +
+        `💵 Amount: ${quote.amount} ${quote.asset}\n` +
+        `🔗 Hash: ${sent.hash}\n` +
+        `🔍 Status: Paid\n` +
+        `-------------------------------\n\n` +
+        `🤖 Proof channel: ${PROOF_CHANNEL}`,
+      reply_markup: {
+        inline_keyboard: [[{ text: 'View transaction', url: link }]]
+      }
+    });
+
+    /* 2) the proof channel */
+    const usr = (
+      await q('SELECT first_name, username FROM users WHERE id=$1', [w.user_id])
+    ).rows[0] || {};
+
+    const who = '@' + (usr.username || usr.first_name || 'user');
+
+    const proof = await tg('sendMessage', {
+      chat_id: PROOF_CHANNEL,
+      text:
+        `💸 New Withdrawal Approved\n` +
+        `----------------\n` +
+        `👤 User: ${who}\n` +
+        `🌐 Network: ${net} (${quote.asset})\n` +
+        `📮 Address: ${shortAddr(w.account)}\n` +
+        `💵 Requested Amount: ${Number(w.etb).toFixed(2)} Birr\n` +
+        `📉 ${quote.fee}% Service Fee: ${quote.feeEtb.toFixed(2)} Birr\n` +
+        `💰 Final Amount: ${quote.amount} ${quote.asset}\n` +
+        `🔗 Hash: ${sent.hash}\n` +
+        `🔍 Status: Paid\n` +
+        `-------------------------------\n\n` +
+        `🤖 Bot: ${BOT_USERNAME ? '@' + BOT_USERNAME : '-'}`,
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [[{ text: 'View on explorer', url: link }]]
+      }
+    });
+
+    if (!proof.ok) {
+      console.error('proof channel post', proof.description);
+
+      await tg('sendMessage', {
+        chat_id: cq.from.id,
+        text: `Paid, but posting to the proof channel failed: ${proof.description}\nHash: ${sent.hash}`
+      });
+    }
+
+    /* 3) the admin who pressed the button */
+    await tg('sendMessage', {
+      chat_id: cq.from.id,
+      text:
+        `Withdrawal #${w.id} paid: ${quote.amount} ${quote.asset}\n` +
+        `Hash: ${sent.hash}\n${link}`,
+      disable_web_page_preview: true
+    });
+
+    return { note: '✅ Paid ' + quote.amount + ' ' + quote.asset };
+  } catch (e) {
+    console.error('crypto payout', w.id, e);
+
+    const msg = String((e && e.message) || e).slice(0, 300);
+
+    const cur = (
+      await q('SELECT tx_hash FROM withdrawals WHERE id=$1', [w.id])
+    ).rows[0];
+
+    if (cur && cur.tx_hash) {
+      /* the transfer was already broadcast: never retry automatically */
+      await q('UPDATE withdrawals SET pay_error=$2 WHERE id=$1', [w.id, msg]);
+
+      await tg('sendMessage', {
+        chat_id: cq.from.id,
+        text:
+          `Withdrawal #${w.id}: the transfer was broadcast (hash ${cur.tx_hash}) ` +
+          `but a later step failed: ${msg}\nCheck it on the explorer, do NOT pay again.`
+      });
+
+      return { note: '⚠️ Sent - check manually' };
+    }
+
+    /* nothing left the wallet: back to pending so the admin can retry */
+    await q(
+      `UPDATE withdrawals SET status='pending', pay_error=$2 WHERE id=$1`,
+      [w.id, msg]
+    );
+
+    await tg('sendMessage', {
+      chat_id: cq.from.id,
+      text:
+        `Payout #${w.id} failed, nothing was sent:\n${msg}\n\n` +
+        `It is still pending. Fix the problem and press Approve & Pay again.`
+    });
+
+    return { note: '❌ Payout failed', retry: true };
+  }
+}
+
 /* ---------- Telegram bot webhook ---------- */
 
 async function handleUpdate(u) {
@@ -4771,6 +5298,7 @@ async function handleUpdate(u) {
     ).split(':');
 
     let note = 'Done';
+    let skipEdit = false;
 
     /* ---------- task ---------- */
 
@@ -4878,7 +5406,20 @@ async function handleUpdate(u) {
     /* ---------- withdrawal ---------- */
 
     else if (kind === 'w') {
-      if (act === 'a') {
+      const wrow = (
+        await q('SELECT method FROM withdrawals WHERE id=$1', [id])
+      ).rows[0];
+
+      if (
+        act === 'a' &&
+        wrow &&
+        CRYPTO_METHODS.includes(wrow.method)
+      ) {
+        const out = await approveCryptoWithdrawal(id, cq);
+
+        note = out.note;
+        skipEdit = !!out.retry;
+      } else if (act === 'a') {
         const r = await q(
           `UPDATE withdrawals
            SET status='paid',
@@ -5010,7 +5551,7 @@ async function handleUpdate(u) {
       }
     );
 
-    if (cq.message) {
+    if (cq.message && !skipEdit) {
       await tg(
         'editMessageReplyMarkup',
         {
