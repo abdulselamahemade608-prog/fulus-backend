@@ -802,7 +802,8 @@ async function tryPayFullReferral(inviteeId, knownChannels) {
       `🎉 ${name} joined all ${chans.length} required channel(s).\n` +
       `You earned ${total} coins from this invite.\n\n` +
       `🎉 ${name} ሁሉንም ${chans.length} ቻናል ተቀላቅለዋል።\n` +
-      `በዚህ ኢንቫይት ${total} ኮይን አግኝተዋል።`
+      `በዚህ ኢንቫይት ${total} ኮይን አግኝተዋል።\n\n` +
+      chans.map((c) => `• ${channelInfo(S, c).title}: +${channelInfo(S, c).reward}`).join('\n')
   }).catch(() => {});
 }
 
@@ -4555,6 +4556,24 @@ async function trackGroupAdds(m, S) {
   }
 }
 
+/* Channel buttons: 2 per row, style success, then the primary "Joined" button */
+function channelKeyboard(S, chans) {
+  const btns = chans.map((c) => {
+    const i = channelInfo(S, c);
+    return { text: '📢 ' + i.title, url: i.url, style: 'success' };
+  });
+
+  const rows = [];
+
+  for (let k = 0; k < btns.length; k += 2) {
+    rows.push(btns.slice(k, k + 2));
+  }
+
+  rows.push([{ text: '✅ Joined', callback_data: 'joined', style: 'primary' }]);
+
+  return rows;
+}
+
 async function handleJoined(cq) {
   const S = await settings();
   const chans = gateChans(S);
@@ -4604,15 +4623,10 @@ async function handleJoined(cq) {
           res.map((x) => (x.ok ? '✅ ' : '❌ ') + channelInfo(S, x.c).title).join('\n') +
           '\n\nThen press "Joined".',
         reply_markup: {
-          inline_keyboard: [
-            ...res
-              .filter((x) => !x.ok)
-              .map((x) => {
-                const i = channelInfo(S, x.c);
-                return [{ text: '📢 ' + i.title, url: i.url, style: 'success' }];
-              }),
-            [{ text: '✅ Joined', callback_data: 'joined', style: 'primary' }]
-          ]
+          inline_keyboard: channelKeyboard(
+            S,
+            res.filter((x) => !x.ok).map((x) => x.c)
+          )
         }
       }).catch(() => {});
     }
@@ -4681,24 +4695,17 @@ async function handleUpdate(u) {
     if (chansS.length) {
       const lines = chansS.map((c) => '• ' + channelInfo(S0, c).title).join('\n');
 
+      const who = from.first_name || from.username || 'friend';
+
       await tg('sendMessage', {
         chat_id: m.chat.id,
         text:
-          (r
-            ? 'Welcome to Adewa! You were invited by a friend.\n\n'
-            : 'Welcome to Adewa!\n\n') +
-          'Step 1 - join all required channels:\n' +
-          lines +
-          '\n\nThen press "Joined".' +
+          `Hello ${who}, Welcome to Adewa mini bots\n\n` +
+          (r ? 'You were invited by a friend.\n\n' : '') +
+          'Join all the required channels below, then press "Joined".' +
           supportLine,
         reply_markup: {
-          inline_keyboard: [
-            ...chansS.map((c) => {
-              const i = channelInfo(S0, c);
-              return [{ text: '📢 ' + i.title, url: i.url, style: 'success' }];
-            }),
-            [{ text: '✅ Joined', callback_data: 'joined', style: 'primary' }]
-          ]
+          inline_keyboard: channelKeyboard(S0, chansS)
         }
       });
 
