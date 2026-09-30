@@ -71,7 +71,7 @@ App name: Adewa (formerly FulusApp) — a Telegram Mini App where users earn coi
 Sections: Home, Tasks, Invite, Withdraw.
 Earning sources: watching ads, completing tasks, inviting friends.
 Coins convert to Birr (ETB); the exchange rate is set by the admin (often 100 coins = 1 Birr).
-Withdraw methods: Telebirr, CBE, M-Pesa (Safaricom). Each withdrawal has a small service fee.
+Withdraw methods: Telebirr and CBE. Each withdrawal has a small service fee.
 Withdrawals are reviewed and paid manually by an admin; proof of payment is posted in the proof channel.
 Invited friends must join the required channels and be active on 2 separate days before the inviter is paid the referral reward.
 There are daily limits on ads/earnings, and VIP users (based on invite count) get higher or unlimited ad limits.
@@ -79,9 +79,22 @@ If you don't know a specific number (exact fee %, exact minimum withdrawal, exac
 `;
 
 const WITHDRAW_METHODS = {
+  telebirr: /^09\d{8}$/,
+  mpesa: /^07\d{8}$/,
+  cbe: /^(1000\d{9}|10000\d{8})$/,
+
+  /* crypto (auto payout) - OFF unless listed in WITHDRAW_METHODS_ENABLED */
   bep20: /^0x[a-fA-F0-9]{40}$/,
   ton: /^([A-Za-z0-9_-]{48}|-?\d:[a-fA-F0-9]{64})$/
 };
+
+/* Env WITHDRAW_METHODS_ENABLED, e.g. "telebirr,cbe" (default) or "telebirr,cbe,mpesa,bep20,ton" */
+const ENABLED_METHODS = String(
+  process.env.WITHDRAW_METHODS_ENABLED || 'telebirr,cbe'
+)
+  .split(',')
+  .map((x) => x.trim().toLowerCase())
+  .filter((x) => ['telebirr', 'cbe'].includes(x)); /* withdraw = Telebirr + CBE only */
 
 const DEFAULT_GATE_CHANNELS = [
   '@andbndj',
@@ -403,6 +416,14 @@ async function settings() {
     v.withdraw_adds_required = 0;
   }
 
+  if (
+    !v.channel_meta ||
+    typeof v.channel_meta !== 'object' ||
+    Array.isArray(v.channel_meta)
+  ) {
+    v.channel_meta = {};
+  }
+
   if (!v.add_group_id) v.add_group_id = process.env.ADD_GROUP_ID || '';
   if (!v.add_group_link) v.add_group_link = process.env.ADD_GROUP_LINK || '';
 
@@ -459,7 +480,8 @@ const SETTING_KEYS = [
 
   'withdraw_adds_required',
   'add_group_id',
-  'add_group_link'
+  'add_group_link',
+  'channel_meta'
 ];
 
 async function ensureUser(tu, refId) {
@@ -647,131 +669,153 @@ async function syncReferralChannels(inviteeId, channels) {
       row.currently_joined = false;
     }
 
-    if (!row.paid && row.currently_joined && row.joined_at) {
-      const heldMs = Date.now() - new Date(row.joined_at).getTime();
-
-      if (heldMs < minHoldMs) continue;
-
-      if (S.referral_require_activity) {
-        const act = (
-          await q(
-            `SELECT
-              EXISTS(SELECT 1 FROM ad_views WHERE user_id=$1 AND completed)
-              OR EXISTS(SELECT 1 FROM users WHERE id=$1 AND last_checkin IS NOT NULL)
-              AS did`,
-            [inviteeId]
-          )
-        ).rows[0].did;
-
-        if (!act) continue;
-      }
-
-      const cap = Number(S.referral_daily_cap || 0);
-
-      if (cap > 0) {
-        const cnt = (
-          await q(
-            `SELECT COUNT(*)::int AS c
-             FROM referral_channels
-             WHERE referrer_id=$1 AND paid AND paid_at::date=CURRENT_DATE`,
-            [row.referrer_id]
-          )
-        ).rows[0].c;
-
-        if (cnt >= cap) continue;
-      }
-
-      const referrer = (
-        await q(`SELECT flagged FROM users WHERE id=$1`, [row.referrer_id])
-      ).rows[0];
-
-      if (!referrer || referrer.flagged) continue;
-
-      const amt = rewardFor(c.chat);
-
-      await q(
-        `UPDATE users
-         SET coins=coins+$2, invite_coins=invite_coins+$2
-         WHERE id=$1`,
-        [row.referrer_id, amt]
-      );
-
-      await q(
-        `UPDATE referral_channels
-         SET paid=true, paid_at=now()
-         WHERE invitee_id=$1 AND channel=$2`,
-        [inviteeId, c.chat]
-      );
-
-      await q(
-        `UPDATE users SET referral_paid=true WHERE id=$1 AND NOT referral_paid`,
-        [inviteeId]
-      );
-
-      row.paid = true;
-
-      const invitee = (
-        await q(
-          `SELECT first_name, username FROM users WHERE id=$1`,
-          [inviteeId]
-        )
-      ).rows[0] || {};
-
-      const name = invitee.username
-        ? '@' + invitee.username
-        : invitee.first_name || 'Someone';
-
-      const remaining = (
-        await q(
-          `SELECT COUNT(*)::int AS c
-           FROM referral_channels
-           WHERE invitee_id=$1 AND NOT was_member_before AND NOT paid`,
-          [inviteeId]
-        )
-      ).rows[0].c;
-
-      await tg('sendMessage', {
-        chat_id: row.referrer_id,
-        text:
-          `🎉 ${name} joined ${c.chat} — you earned ${amt} coins!` +
-          (remaining > 0
-            ? `\n${remaining} more channel(s) for the full bonus.`
-            : '')
-      }).catch(() => {});
-
-      if (remaining === 0) {
-        const bonus = Number(S.referral_full_bonus || 0);
-
-        const already = (
-          await q(
-            `SELECT full_referral_bonus_paid FROM users WHERE id=$1`,
-            [inviteeId]
-          )
-        ).rows[0];
-
-        if (bonus > 0 && already && !already.full_referral_bonus_paid) {
-          await q(
-            `UPDATE users
-             SET coins=coins+$2, invite_coins=invite_coins+$2
-             WHERE id=$1`,
-            [row.referrer_id, bonus]
-          );
-
-          await q(
-            `UPDATE users SET full_referral_bonus_paid=true WHERE id=$1`,
-            [inviteeId]
-          );
-
-          await tg('sendMessage', {
-            chat_id: row.referrer_id,
-            text:
-              `🏆 ${name} joined every required channel! Full bonus: +${bonus} coins.`
-          }).catch(() => {});
-        }
-      }
-    }
   }
 }
+
+/* =========================================================
+   REQUIRED CHANNELS: title / link / reward + full referral pay
+========================================================= */
+
+function gateChans(S) {
+  const c = Array.isArray(S.gate_channels) && S.gate_channels.length
+    ? S.gate_channels
+    : DEFAULT_GATE_CHANNELS;
+
+  return c.length ? c : DEFAULT_GATE_CHANNELS;
+}
+
+function channelInfo(S, chat) {
+  const meta = (S.channel_meta && S.channel_meta[chat]) || {};
+  const rw = (S.channel_rewards || {})[chat];
+
+  return {
+    chat,
+    title: meta.title || String(chat),
+    url: meta.link || chatUrl(chat),
+    reward: Number(rw != null && rw !== '' ? rw : S.referral_reward || 0)
+  };
+}
+
+async function isChannelMember(chat, userId) {
+  const r = await tg('getChatMember', { chat_id: chat, user_id: userId });
+
+  if (!r.ok) return false;
+
+  const st = r.result.status;
+
+  return st === 'restricted'
+    ? !!r.result.is_member
+    : ['member', 'administrator', 'creator'].includes(st);
+}
+
+/*
+ * The inviter is paid ONCE, when the invited person
+ *   1) joined ALL required channels, and
+ *   2) passed the multi-account / VPN check (fraud status "verified").
+ * Amount = sum of every channel's reward (4 channels x 250 = 1000).
+ */
+async function tryPayFullReferral(inviteeId, knownChannels) {
+  const u = (
+    await q(
+      `SELECT id, first_name, username, referred_by, referral_paid, flagged, banned
+       FROM users WHERE id=$1`,
+      [inviteeId]
+    )
+  ).rows[0];
+
+  if (!u || !u.referred_by || u.referral_paid || u.flagged || u.banned) return;
+  if (String(u.referred_by) === String(u.id)) return;
+
+  const fz = (
+    await q('SELECT status FROM fraud_users WHERE telegram_id=$1', [inviteeId])
+  ).rows[0];
+
+  if (!fz || fz.status !== 'verified') return;
+
+  const S = await settings();
+  const chans = gateChans(S);
+
+  let allJoined;
+
+  if (knownChannels && knownChannels.length) {
+    allJoined = chans.every((c) =>
+      knownChannels.some((k) => k.chat === c && k.joined)
+    );
+  } else {
+    const rs = await Promise.all(chans.map((c) => isChannelMember(c, inviteeId)));
+    allJoined = rs.every(Boolean);
+  }
+
+  if (!allJoined) return;
+
+  const ref = (
+    await q('SELECT id, flagged, banned FROM users WHERE id=$1', [u.referred_by])
+  ).rows[0];
+
+  if (!ref || ref.flagged || ref.banned) return;
+
+  let total = chans.reduce((a, c) => a + channelInfo(S, c).reward, 0);
+
+  const bonus = Number(S.referral_full_bonus || 0);
+  if (bonus > 0) total += bonus;
+
+  /* atomic: only one request can win, so it can never pay twice */
+  const claim = await q(
+    `UPDATE users
+     SET referral_paid=true, full_referral_bonus_paid=true
+     WHERE id=$1 AND referral_paid=false
+     RETURNING id`,
+    [inviteeId]
+  );
+
+  if (!claim.rowCount) return;
+
+  if (total > 0) {
+    await q(
+      `UPDATE users
+       SET coins=coins+$2,
+           invite_coins=invite_coins+$2,
+           daily_ads =
+             CASE WHEN daily_earn_day=CURRENT_DATE THEN daily_ads ELSE 0 END,
+           daily_task =
+             CASE WHEN daily_earn_day=CURRENT_DATE THEN daily_task ELSE 0 END,
+           daily_invite =
+             CASE WHEN daily_earn_day=CURRENT_DATE THEN daily_invite+$2 ELSE $2 END,
+           daily_earn_day=CURRENT_DATE
+       WHERE id=$1`,
+      [u.referred_by, total]
+    );
+  }
+
+  await q(
+    `UPDATE referral_channels
+     SET paid=true, paid_at=now(), currently_joined=true
+     WHERE invitee_id=$1`,
+    [inviteeId]
+  );
+
+  const name = u.username ? '@' + u.username : u.first_name || 'Someone';
+
+  await tg('sendMessage', {
+    chat_id: u.referred_by,
+    text:
+      `🎉 ${name} joined all ${chans.length} required channel(s).\n` +
+      `You earned ${total} coins from this invite.\n\n` +
+      `🎉 ${name} ሁሉንም ${chans.length} ቻናል ተቀላቅለዋል።\n` +
+      `በዚህ ኢንቫይት ${total} ኮይን አግኝተዋል።`
+  }).catch(() => {});
+}
+
+async function saveSettingRow(key, value) {
+  await q(
+    `INSERT INTO settings(key, value) VALUES($1,$2)
+     ON CONFLICT(key) DO UPDATE SET value=$2`,
+    [key, JSON.stringify(value)]
+  );
+
+  sCache.t = 0;
+}
+
 
 const auth = ah(async (req, res, next) => {
   const d = verifyInitData(
@@ -821,7 +865,9 @@ const auth = ah(async (req, res, next) => {
     });
   }
 
-  if (!fz || fz.status !== 'verified') {
+  const gateOnly = String(req.originalUrl || '').split('?')[0] === '/api/gate';
+
+  if (!gateOnly && (!fz || fz.status !== 'verified')) {
     return fail(res, 403, 'not_verified');
   }
 
@@ -1222,6 +1268,10 @@ app.post(
       }
     }
 
+    await tryPayFullReferral(telegramId).catch((e) =>
+      console.error('tryPayFullReferral', e)
+    );
+
     return res.json({
       ok: true,
       status: 'verified',
@@ -1338,9 +1388,13 @@ async function checkGate(user, force) {
     ]
   );
 
-  syncReferralChannels(user.id, channels).catch((e) =>
-    console.error('syncReferralChannels', e)
-  );
+  try {
+    await syncReferralChannels(user.id, channels);
+
+    if (ok) await tryPayFullReferral(user.id, channels);
+  } catch (e) {
+    console.error('syncReferralChannels', e);
+  }
 
   return {
     ok,
@@ -1619,11 +1673,16 @@ app.get(
 
     res.json({
       ok: g.ok,
-      channels: g.channels.map(
-        (c) => ({
-          chat: c.chat,
-          joined: c.joined,
-          url: chatUrl(c.chat)
+      channels: await Promise.all(
+        g.channels.map(async (c) => {
+          const info = channelInfo(await settings(), c.chat);
+
+          return {
+            chat: c.chat,
+            joined: c.joined,
+            title: info.title,
+            url: info.url
+          };
         })
       )
     });
@@ -3018,7 +3077,8 @@ app.post(
 
     if (
       !(etb > 0) ||
-      !WITHDRAW_METHODS[method]
+      !WITHDRAW_METHODS[method] ||
+      !availableMethods().includes(method)
     ) {
       return fail(
         res,
@@ -3511,6 +3571,71 @@ app.post(
 );
 
 app.post(
+  '/api/admin/channel',
+  auth,
+  adminOnly,
+  ah(async (req, res) => {
+    const b = req.body || {};
+    const S = await settings();
+
+    const list = Array.isArray(S.gate_channels) && S.gate_channels.length
+      ? [...S.gate_channels]
+      : [];
+
+    const rewards = { ...(S.channel_rewards || {}) };
+    const meta = { ...(S.channel_meta || {}) };
+
+    const toChat = (v) => {
+      const m = /^(?:https?:\/\/)?(?:t\.me\/)?@?([A-Za-z][A-Za-z0-9_]{3,})\/?$/.exec(
+        String(v || '').trim()
+      );
+
+      return m ? '@' + m[1] : null;
+    };
+
+    const chat = toChat(b.link || b.chat);
+
+    if (!chat) {
+      return fail(res, 400, 'bad_channels');
+    }
+
+    if (b.action === 'remove') {
+      const i = list.indexOf(chat);
+      if (i >= 0) list.splice(i, 1);
+      delete rewards[chat];
+      delete meta[chat];
+    } else {
+      const title = String(b.title || '').trim().slice(0, 40);
+      const reward = Number(b.reward);
+
+      if (!title || !(reward >= 0)) {
+        return fail(res, 400, 'bad_input');
+      }
+
+      const info = await tg('getChat', { chat_id: chat });
+
+      if (!info.ok) {
+        return fail(res, 400, 'bad_channels', {
+          detail: info.description
+        });
+      }
+
+      if (!list.includes(chat)) list.push(chat);
+
+      rewards[chat] = reward;
+      meta[chat] = { title, link: 'https://t.me/' + chat.slice(1) };
+    }
+
+    await saveSettingRow('gate_channels', list);
+    await saveSettingRow('channel_rewards', rewards);
+    await saveSettingRow('channel_meta', meta);
+
+    res.json({ ok: true });
+  })
+);
+
+
+app.post(
   '/api/admin/task',
   auth,
   adminOnly,
@@ -3960,7 +4085,9 @@ app.post(
 const tonUsdCache = { t: 0, v: 0 };
 
 function availableMethods() {
-  return Object.keys(WITHDRAW_METHODS);
+  return Object.keys(WITHDRAW_METHODS).filter((m) =>
+    ENABLED_METHODS.includes(m)
+  );
 }
 
 let cryptoColsReady = null;
@@ -4428,6 +4555,97 @@ async function trackGroupAdds(m, S) {
   }
 }
 
+async function handleJoined(cq) {
+  const S = await settings();
+  const chans = gateChans(S);
+  const uid = cq.from.id;
+  const chatId = cq.message && cq.message.chat.id;
+  const msgId = cq.message && cq.message.message_id;
+
+  await ensureUser(cq.from, null);
+
+  const ban = (
+    await q(
+      `SELECT u.banned, f.status
+       FROM users u LEFT JOIN fraud_users f ON f.telegram_id=u.id
+       WHERE u.id=$1`,
+      [uid]
+    )
+  ).rows[0];
+
+  if (ban && (ban.banned || ban.status === 'banned')) {
+    await tg('answerCallbackQuery', {
+      callback_query_id: cq.id,
+      text: 'Your account has been banned.',
+      show_alert: true
+    });
+    return;
+  }
+
+  const res = await Promise.all(
+    chans.map(async (c) => ({ c, ok: await isChannelMember(c, uid) }))
+  );
+
+  const missing = res.filter((x) => !x.ok);
+
+  if (missing.length) {
+    await tg('answerCallbackQuery', {
+      callback_query_id: cq.id,
+      text: `You still need to join ${missing.length} channel(s).`,
+      show_alert: true
+    });
+
+    if (chatId) {
+      await tg('editMessageText', {
+        chat_id: chatId,
+        message_id: msgId,
+        text:
+          'Step 1 - join all required channels:\n' +
+          res.map((x) => (x.ok ? '✅ ' : '❌ ') + channelInfo(S, x.c).title).join('\n') +
+          '\n\nThen press "Joined".',
+        reply_markup: {
+          inline_keyboard: [
+            ...res
+              .filter((x) => !x.ok)
+              .map((x) => {
+                const i = channelInfo(S, x.c);
+                return [{ text: '📢 ' + i.title, url: i.url, style: 'success' }];
+              }),
+            [{ text: '✅ Joined', callback_data: 'joined', style: 'primary' }]
+          ]
+        }
+      }).catch(() => {});
+    }
+
+    return;
+  }
+
+  await tg('answerCallbackQuery', {
+    callback_query_id: cq.id,
+    text: 'All channels joined ✅'
+  });
+
+  if (chatId) {
+    await tg('editMessageText', {
+      chat_id: chatId,
+      message_id: msgId,
+      text:
+        'All required channels joined ✅\n\n' +
+        'Tap the button to open Adewa. Channels are checked again and your account ' +
+        'is verified (VPN / multiple accounts) when the app opens.',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'Open Adewa', style: 'success', web_app: { url: MINI_APP_URL } }]
+        ]
+      }
+    });
+  }
+
+  /* if the app was already verified, pay the inviter right away */
+  await tryPayFullReferral(uid).catch(() => {});
+}
+
+
 async function handleUpdate(u) {
   if (u.message) {
     const m = u.message;
@@ -4458,32 +4676,46 @@ async function handleUpdate(u) {
         ? `\n\nNeed help? Contact @${S0.support_bot_username}`
         : '';
 
-      await tg(
-        'sendMessage',
-        {
-          chat_id: m.chat.id,
-          text: (r
-            ? 'Welcome to Adewa! You were invited by a friend — tap the button below to open the app.'
-            : 'Welcome to Adewa. Tap the button to open the app.') + supportLine,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text:
-                    'Open Adewa',
-                  style: 'success',
-                  web_app: {
-                    url:
-                      MINI_APP_URL
-                  }
-                }
-              ]
-            ]
-          }
+          const chansS = gateChans(S0);
+
+    if (chansS.length) {
+      const lines = chansS.map((c) => '• ' + channelInfo(S0, c).title).join('\n');
+
+      await tg('sendMessage', {
+        chat_id: m.chat.id,
+        text:
+          (r
+            ? 'Welcome to Adewa! You were invited by a friend.\n\n'
+            : 'Welcome to Adewa!\n\n') +
+          'Step 1 - join all required channels:\n' +
+          lines +
+          '\n\nThen press "Joined".' +
+          supportLine,
+        reply_markup: {
+          inline_keyboard: [
+            ...chansS.map((c) => {
+              const i = channelInfo(S0, c);
+              return [{ text: '📢 ' + i.title, url: i.url, style: 'success' }];
+            }),
+            [{ text: '✅ Joined', callback_data: 'joined', style: 'primary' }]
+          ]
         }
-      );
+      });
 
       return;
+    }
+
+    await tg('sendMessage', {
+      chat_id: m.chat.id,
+      text: 'Welcome to Adewa. Tap the button to open the app.' + supportLine,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'Open Adewa', style: 'success', web_app: { url: MINI_APP_URL } }]
+        ]
+      }
+    });
+
+    return;
     }
 
     if (
@@ -4909,6 +5141,11 @@ async function handleUpdate(u) {
       'data=' + cq.data,
       'isAdmin=' + isAdmin(cq.from.id)
     );
+
+    if (cq.data === 'joined') {
+      await handleJoined(cq).catch((e) => console.error('joined', e));
+      return;
+    }
 
     if (!isAdmin(cq.from.id)) {
       console.log(
