@@ -424,8 +424,12 @@ async function settings() {
     v.channel_meta = {};
   }
 
-  if (!v.add_group_id) v.add_group_id = process.env.ADD_GROUP_ID || '';
-  if (!v.add_group_link) v.add_group_link = process.env.ADD_GROUP_LINK || '';
+  v.add_group_id = String(v.add_group_id || process.env.ADD_GROUP_ID || '').trim();
+  v.add_group_link = String(v.add_group_link || process.env.ADD_GROUP_LINK || '').trim();
+
+  if (!(Number(v.withdraw_interval_hours) > 0)) {
+    v.withdraw_interval_hours = 48;
+  }
 
   sCache = {
     t: Date.now(),
@@ -4526,7 +4530,14 @@ async function countGroupAdds(userId, S) {
 }
 
 async function trackGroupAdds(m, S) {
-  if (!S.add_group_id || String(m.chat.id) !== String(S.add_group_id)) return;
+  if (!S.add_group_id) return;
+
+  if (String(m.chat.id) !== String(S.add_group_id)) {
+    if (m.new_chat_members) {
+      console.log('group_add ignored: chat', m.chat.id, 'expected', S.add_group_id);
+    }
+    return;
+  }
 
   await ensureGroupAdds();
 
@@ -4723,6 +4734,91 @@ async function handleUpdate(u) {
     });
 
     return;
+    }
+
+    /* /addcredit <user_id> <count>  - admin only: manually credit group adds
+       (for people who were added before the bot was in the group) */
+    if (
+      m.text &&
+      m.text.startsWith('/addcredit') &&
+      isAdmin(from.id)
+    ) {
+      const parts = m.text.trim().split(/\s+/);
+      const uid = Number(parts[1]);
+      const n = Math.min(Math.max(parseInt(parts[2], 10) || 0, 0), 100);
+      const Sc = await settings();
+
+      let out;
+
+      if (!Sc.add_group_id) {
+        out = 'Group chat id is not set in Admin > Settings.';
+      } else if (!uid || !n) {
+        out = 'Usage: /addcredit <user_id> <count>';
+      } else {
+        await ensureGroupAdds();
+
+        const base = Date.now() * 1000;
+
+        for (let i = 0; i < n; i++) {
+          await q(
+            `INSERT INTO group_adds (chat_id, member_id, adder_id)
+             VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+            [Sc.add_group_id, -(base + i), uid]
+          );
+        }
+
+        out = `Credited ${n} group add(s) to ${uid}. Now counted: ${await countGroupAdds(uid, Sc)}`;
+      }
+
+      await tg('sendMessage', { chat_id: m.chat.id, text: out });
+
+      return;
+    }
+
+    if (
+      m.text &&
+      m.text.startsWith('/checkgroup') &&
+      isAdmin(from.id)
+    ) {
+      const Sg = await settings();
+      const gid = Sg.add_group_id || '';
+
+      const lines = [
+        `Configured group id: ${gid || '(not set)'}`,
+        `This chat id: ${m.chat.id}`,
+        `Required adds: ${Number(Sg.withdraw_adds_required || 0)}`
+      ];
+
+      if (gid) {
+        await ensureGroupAdds();
+
+        const me = await tg('getMe', {});
+        const cm = me.ok
+          ? await tg('getChatMember', { chat_id: gid, user_id: me.result.id })
+          : null;
+
+        lines.push(
+          cm && cm.ok
+            ? `Bot status in the group: ${cm.result.status}`
+            : `Bot cannot see the group: ${cm ? cm.description : 'getMe failed'}`
+        );
+
+        const tot = await q(
+          'SELECT COUNT(*)::int AS c FROM group_adds WHERE chat_id=$1',
+          [gid]
+        );
+
+        lines.push(`Adds recorded in total: ${tot.rows[0].c}`);
+        lines.push(`Adds counted for you: ${await countGroupAdds(from.id, Sg)}`);
+      }
+
+      if (m.chat.type !== 'private' && String(m.chat.id) !== String(gid)) {
+        lines.push('WARNING: this chat id does not match the configured group id.');
+      }
+
+      await tg('sendMessage', { chat_id: m.chat.id, text: lines.join('\n') });
+
+      return;
     }
 
     if (
