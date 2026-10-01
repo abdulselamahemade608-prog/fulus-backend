@@ -97,6 +97,10 @@ const ENABLED_METHODS = String(
   .filter((x) => ['telebirr', 'cbe'].includes(x)); /* withdraw = Telebirr + CBE only */
 
 const DEFAULT_GATE_CHANNELS = [
+  '@andbndj',
+  '@proof_chnallel',
+  '@ABDU_CRYPTO',
+  '@m_r_work1'
 ];
 
 const pool = new Pool({
