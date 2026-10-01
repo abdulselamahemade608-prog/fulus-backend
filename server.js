@@ -4039,6 +4039,12 @@ app.post(
       action
     } = req.body || {};
 
+    if (action === 'unflag_all') {
+      await q('UPDATE users SET flagged=false WHERE flagged');
+
+      return res.json({ ok: true });
+    }
+
     if (
       !/^\d+$/.test(
         String(id)
@@ -4734,6 +4740,37 @@ async function handleUpdate(u) {
     });
 
     return;
+    }
+
+    /* /unflag [user_id]  - admin only (no id = your own account)
+       /unflagall         - admin only: clears the review flag for everyone */
+    if (
+      m.text &&
+      (m.text.startsWith('/unflagall') || m.text.startsWith('/unflag')) &&
+      isAdmin(from.id)
+    ) {
+      let out;
+
+      if (m.text.startsWith('/unflagall')) {
+        const r = await q('UPDATE users SET flagged=false WHERE flagged');
+        out = `Cleared review flag for ${r.rowCount} account(s).`;
+      } else {
+        const arg = (m.text.trim().split(/\s+/)[1] || '').trim();
+        const uid = arg ? Number(arg) : from.id;
+
+        if (!uid) {
+          out = 'Usage: /unflag <user_id>  (no id = your own account)';
+        } else {
+          const r = await q('UPDATE users SET flagged=false WHERE id=$1', [uid]);
+          out = r.rowCount
+            ? `Account ${uid} is no longer under review.`
+            : `User ${uid} not found.`;
+        }
+      }
+
+      await tg('sendMessage', { chat_id: m.chat.id, text: out });
+
+      return;
     }
 
     /* /addcredit <user_id> <count>  - admin only: manually credit group adds
